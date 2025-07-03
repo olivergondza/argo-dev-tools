@@ -25,10 +25,16 @@ func (c cdLocal) Run() error {
 	if err != nil {
 		return err
 	}
+	if wasInterrupted() {
+		return nil
+	}
 
 	err = checkDocker()
 	if err != nil {
 		return err
+	}
+	if wasInterrupted() {
+		return nil
 	}
 
 	cluster, err := startK3dCluster("argo-dev-tools")
@@ -36,7 +42,6 @@ func (c cdLocal) Run() error {
 		return err
 	}
 	defer cluster.Close()
-	registerCleanup(func() { cluster.Close() })
 
 	return nil
 }
@@ -48,22 +53,15 @@ func (c cdLocal) Name() string {
 type cdE2e struct{}
 
 func (c cdE2e) Run() error {
-	err := checkMarker("Makefile", regexp.MustCompile("^PACKAGE=github.com/argoproj/argo-cd/"))
+	cluster, err := startCluster()
 	if err != nil {
 		return err
 	}
-
-	err = checkDocker()
-	if err != nil {
-		return err
-	}
-
-	cluster, err := startK3dCluster("argo-dev-tools")
-	if err != nil {
-		return err
+	// Interrupted
+	if cluster == nil {
+		return nil
 	}
 	defer cluster.Close()
-	registerCleanup(func() { cluster.Close() })
 
 	makeStartE2eLocal := []string{
 		"make", "start-e2e-local",
@@ -86,4 +84,28 @@ func (c cdE2e) Name() string {
 
 func init() {
 	projectRegistry["cd"] = projectCd{}
+}
+
+func startCluster() (*kubeCluster, error) {
+	err := checkMarker("Makefile", regexp.MustCompile("^PACKAGE=github.com/argoproj/argo-cd/"))
+	if err != nil {
+		return nil, err
+	}
+	if wasInterrupted() {
+		return nil, nil
+	}
+
+	err = checkDocker()
+	if err != nil {
+		return nil, err
+	}
+	if wasInterrupted() {
+		return nil, nil
+	}
+
+	cluster, err := startK3dCluster("argo-dev-tools")
+	if err != nil {
+		return nil, err
+	}
+	return cluster, nil
 }

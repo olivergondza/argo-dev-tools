@@ -24,8 +24,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	defer cleanAll()
-
 	project, command, err := findCommand(args[1], args[2])
 	if err != nil {
 		out(os.Stderr, "Unknown command for '%s' '%s'", args[1], args[2])
@@ -40,11 +38,8 @@ func main() {
 		os.Exit(2)
 	}
 
-	cleanAll()
-
 	out(os.Stderr, "Command completed normally")
 	out(os.Stdout, "Command completed normally")
-	//time.Sleep(1 * time.Second)
 }
 
 func usage() {

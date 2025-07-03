@@ -1,20 +1,26 @@
 package main
 
-import "os"
+import (
+	"os"
+	"os/exec"
+)
 
 type kubeCluster struct {
 	name string
 }
 
 func (cluster *kubeCluster) Close() {
-	if err := osExec(cmdDeleteCluster(cluster.name)...); err != nil {
+	// cannot use osExec - run after main context is cancelled
+	err := exec.Command("k3d", "cluster", "delete", cluster.name).Run()
+	if err != nil {
 		out(os.Stderr, "Failed to interrupt kubeCluster: %s", err)
+		return
 	}
 }
 
 func startK3dCluster(name string) (c *kubeCluster, err error) {
 	cluster := &kubeCluster{name}
-	// Clean up half provisioned resources
+	// Clean up even half provisioned resources in case startK3dCluster itself fails
 	defer func() {
 		if err != nil {
 			cluster.Close()
@@ -42,10 +48,6 @@ func startK3dCluster(name string) (c *kubeCluster, err error) {
 	//TODO kubectl project argocd; is it needed?
 
 	return cluster, nil
-}
-
-func cmdDeleteCluster(name string) []string {
-	return []string{"k3d", "cluster", "delete", name}
 }
 
 func cmdCreateCluster(name string, ip string) []string {

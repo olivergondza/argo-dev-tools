@@ -1,38 +1,43 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 )
 
-var cleanStack []func()
-var cleanLock sync.Mutex
+var mainTt *taskTracker
 
-func registerCleanup(cleaner func()) {
-	cleanLock.Lock()
-	defer cleanLock.Unlock()
-	cleanStack = append(cleanStack, cleaner)
+type taskTracker struct {
+	ctx    context.Context
+	cancel func()
+	count  *sync.WaitGroup
 }
 
-func cleanAll() {
-	cleanLock.Lock()
-	defer cleanLock.Unlock()
+func (t *taskTracker) useContext() (context.Context, func()) {
+	t.count.Add(1)
+	out(os.Stderr, "CONTEXT USED")
+	return t.ctx, func() {
+		out(os.Stderr, "CONTEXT RETURNED")
+		t.count.Done()
+	}
+}
 
-	stackLen := len(cleanStack)
-	out(os.Stderr, "Registered cleaners: %d", stackLen)
-
-	for len(cleanStack) > 0 {
-		last := len(cleanStack) - 1
-		cleaner := cleanStack[last]
-		cleanStack = cleanStack[:last]
-		out(os.Stderr, "Cleaning %v (%d)", cleaner, last)
-		cleaner()
+func wasInterrupted() bool {
+	select {
+	case <-mainTt.ctx.Done():
+		return true
+	default:
+		return false
 	}
 }
 
 func init() {
+	ctx, cancel := context.WithCancel(context.Background())
+	mainTt = &taskTracker{ctx, cancel, &sync.WaitGroup{}}
+
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	go onSignal(signals)
@@ -42,10 +47,16 @@ func onSignal(signals chan os.Signal) {
 	sig := <-signals
 	out(os.Stderr, "Caught signal %v", sig)
 
-	cleanAll()
+	mainTt.cancel()
+	out(os.Stderr, "Waiting for tasks to complete")
+	mainTt.count.Wait()
+	//cleanAll()
 
 	_ = os.Stderr.Sync()
 	_ = os.Stdout.Sync()
+
+	_ = os.Stderr.Close()
+	_ = os.Stdout.Close()
 
 	os.Exit(42)
 }
