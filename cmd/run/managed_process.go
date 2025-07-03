@@ -41,7 +41,7 @@ func newManagedProc(args ...string) *managedProc {
 	args = args[1:]
 
 	var ctx context.Context
-	ctx, mp.releaseContextTask = mainTt.useContext()
+	ctx, mp.releaseContextTask = mainTt.useContext("process-" + mp.visual)
 	mp.cmd = exec.CommandContext(ctx, command, args...)
 
 	// Start all children processes in one process group to deliver the SIGTERM in one go.

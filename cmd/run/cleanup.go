@@ -16,11 +16,11 @@ type taskTracker struct {
 	count  *sync.WaitGroup
 }
 
-func (t *taskTracker) useContext() (context.Context, func()) {
+func (t *taskTracker) useContext(name string) (context.Context, func()) {
 	t.count.Add(1)
-	out(os.Stderr, "CONTEXT USED")
+	out(os.Stderr, "CONTEXT USED "+name)
 	return t.ctx, func() {
-		out(os.Stderr, "CONTEXT RETURNED")
+		out(os.Stderr, "CONTEXT RETURNED "+name)
 		t.count.Done()
 	}
 }
@@ -50,6 +50,7 @@ func onSignal(signals chan os.Signal) {
 	mainTt.cancel()
 	out(os.Stderr, "Waiting for tasks to complete")
 	mainTt.count.Wait()
+	out(os.Stderr, "All tasks completed")
 
 	os.Exit(42)
 }

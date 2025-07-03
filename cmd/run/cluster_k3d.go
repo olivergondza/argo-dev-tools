@@ -7,19 +7,27 @@ import (
 
 type kubeCluster struct {
 	name string
+	// trackerClose prevents program completion on interrupt
+	trackerClose func()
 }
 
 func (cluster *kubeCluster) Close() {
+	out(os.Stderr, "Closing kubeCluster")
 	// cannot use osExec - run after main context is cancelled
 	err := exec.Command("k3d", "cluster", "delete", cluster.name).Run()
 	if err != nil {
-		out(os.Stderr, "Failed to interrupt kubeCluster: %s", err)
+		out(os.Stderr, "Failed to close kubeCluster: %s", err)
 		return
 	}
+	out(os.Stderr, "Closed kubeCluster")
+	cluster.trackerClose()
 }
 
 func startK3dCluster(name string) (c *kubeCluster, err error) {
-	cluster := &kubeCluster{name}
+	cluster := &kubeCluster{name, func() {}}
+	// Delete eventual leftovers from previous runs
+	cluster.Close()
+
 	// Clean up even half provisioned resources in case startK3dCluster itself fails
 	defer func() {
 		if err != nil {
@@ -27,8 +35,9 @@ func startK3dCluster(name string) (c *kubeCluster, err error) {
 		}
 	}()
 
-	// Delete eventual leftovers from previous runs
-	cluster.Close()
+	// Create pseudo-task for cluster ownership, to prevent interruption before the cluster is Close()d
+	// The context is actually not needed, just the task
+	_, cluster.trackerClose = mainTt.useContext("k3d_cluster")
 
 	if err := osExec(cmdCreateCluster(name, getOutboundIP())...); err != nil {
 		return nil, err
