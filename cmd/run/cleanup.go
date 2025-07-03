@@ -50,13 +50,6 @@ func onSignal(signals chan os.Signal) {
 	mainTt.cancel()
 	out(os.Stderr, "Waiting for tasks to complete")
 	mainTt.count.Wait()
-	//cleanAll()
-
-	_ = os.Stderr.Sync()
-	_ = os.Stdout.Sync()
-
-	_ = os.Stderr.Close()
-	_ = os.Stdout.Close()
 
 	os.Exit(42)
 }
