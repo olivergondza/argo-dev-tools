@@ -21,25 +21,13 @@ func (p projectCd) Commands() []projectCommand {
 type cdLocal struct{}
 
 func (c cdLocal) Run() error {
-	err := checkMarker("Makefile", regexp.MustCompile("^PACKAGE=github.com/argoproj/argo-cd/"))
+	cluster, err := startCluster()
 	if err != nil {
 		return err
 	}
-	if wasInterrupted() {
+	// Interrupted
+	if cluster == nil {
 		return nil
-	}
-
-	err = checkDocker()
-	if err != nil {
-		return err
-	}
-	if wasInterrupted() {
-		return nil
-	}
-
-	cluster, err := startK3dCluster("argo-dev-tools")
-	if err != nil {
-		return err
 	}
 	defer cluster.Close()
 
@@ -71,7 +59,7 @@ func (c cdE2e) Run() error {
 		"ARGOCD_E2E_K3S=true",
 	}
 	// This is the meat - here we wait for ^C
-	if err := osExec(makeStartE2eLocal...); err != nil {
+	if err := osExecGoreman(makeStartE2eLocal...); err != nil {
 		return err
 	}
 

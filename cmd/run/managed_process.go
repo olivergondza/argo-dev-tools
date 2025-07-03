@@ -22,8 +22,9 @@ func osExec(args ...string) error {
 }
 
 type managedProc struct {
-	visual string
-	cmd    *exec.Cmd
+	visual            string
+	cmd               *exec.Cmd
+	stdoutTransformer func(in string) string
 
 	releaseContextTask func()
 	status             managedProcStatus
@@ -101,7 +102,7 @@ func (mp *managedProc) pumpOutputs() (*sync.WaitGroup, error) {
 	if err != nil {
 		return nil, err
 	}
-	outPump := &streamPump{outPipe, os.Stdout, nil, &wg}
+	outPump := &streamPump{outPipe, os.Stdout, mp.stdoutTransformer, &wg}
 	errPump := &streamPump{errPipe, os.Stderr, nil, &wg}
 	go outPump.pump()
 	go errPump.pump()
