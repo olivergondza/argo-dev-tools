@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -12,19 +13,14 @@ import (
 	"syscall"
 )
 
-func osExec(args ...string) error {
-	mp := newManagedProc(args...)
-	if err := mp.run(); err != nil {
-		return err
-	}
+// lineTransformer optionally mutates lines of a ManagedProc output.
+// Modified string will be printed, line is omitted is nil is returned.
+type lineTransformer func(in string) *string
 
-	return nil
-}
-
-type managedProc struct {
+type ManagedProc struct {
 	visual            string
 	cmd               *exec.Cmd
-	stdoutTransformer func(in string) string
+	stdoutTransformer lineTransformer
 
 	releaseContextTask func()
 	status             managedProcStatus
@@ -32,8 +28,8 @@ type managedProc struct {
 
 type managedProcStatus = string
 
-func newManagedProc(args ...string) *managedProc {
-	mp := &managedProc{
+func NewManagedProc(args ...string) *ManagedProc {
+	mp := &ManagedProc{
 		visual: fmt.Sprintf("$ %s", strings.Join(args, " ")),
 	}
 	mp.update("new") // Set status this way so the transition is logged
@@ -64,7 +60,16 @@ func newManagedProc(args ...string) *managedProc {
 	return mp
 }
 
-func (mp *managedProc) run() error {
+func (mp *ManagedProc) CaptureStdout() *bytes.Buffer {
+	buffer := new(bytes.Buffer)
+	mp.stdoutTransformer = func(in string) *string {
+		buffer.WriteString(in)
+		return nil
+	}
+	return buffer
+}
+
+func (mp *ManagedProc) Run() error {
 	outputsWritten, err := mp.pumpOutputs()
 	if err != nil {
 		return err
@@ -91,7 +96,7 @@ func (mp *managedProc) run() error {
 	return nil
 }
 
-func (mp *managedProc) pumpOutputs() (*sync.WaitGroup, error) {
+func (mp *ManagedProc) pumpOutputs() (*sync.WaitGroup, error) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	outPipe, err := mp.cmd.StdoutPipe()
@@ -109,11 +114,11 @@ func (mp *managedProc) pumpOutputs() (*sync.WaitGroup, error) {
 	return &wg, err
 }
 
-func (mp *managedProc) String() string {
+func (mp *ManagedProc) String() string {
 	return fmt.Sprintf("%v: %s", mp.status, mp.visual)
 }
 
-func (mp *managedProc) update(status managedProcStatus) {
+func (mp *ManagedProc) update(status managedProcStatus) {
 	mp.status = status
 	out(os.Stderr, "managedProcess: %v", mp)
 }
@@ -121,7 +126,7 @@ func (mp *managedProc) update(status managedProcStatus) {
 type streamPump struct {
 	reader      io.ReadCloser
 	writer      io.Writer
-	transformer func(string) string
+	transformer lineTransformer
 	done        *sync.WaitGroup
 }
 
@@ -130,16 +135,18 @@ func (sp *streamPump) pump() {
 
 	// Noop if nil transformer configured
 	if sp.transformer == nil {
-		sp.transformer = func(s string) string { return s }
+		sp.transformer = func(s string) *string { return &s }
 	}
 
 	scanner := bufio.NewScanner(sp.reader)
 	for scanner.Scan() {
 		line := sp.transformer(scanner.Text())
 
-		_, err := fmt.Fprintf(sp.writer, "%s\n", line)
-		if err != nil {
-			return
+		if line != nil {
+			_, err := fmt.Fprintf(sp.writer, "%s\n", *line)
+			if err != nil {
+				return
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {

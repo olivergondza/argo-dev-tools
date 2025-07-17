@@ -13,7 +13,7 @@ type kubeCluster struct {
 
 func (cluster *kubeCluster) Close() {
 	out(os.Stderr, "Closing kubeCluster")
-	// cannot use osExec - run after main context is cancelled
+	// cannot use NewManagedProc - run after main context is cancelled
 	err := exec.Command("k3d", "cluster", "delete", cluster.name).Run()
 	if err != nil {
 		out(os.Stderr, "Failed to close kubeCluster: %s", err)
@@ -39,7 +39,8 @@ func startK3dCluster(name string) (c *kubeCluster, err error) {
 	// The context is actually not needed, just the task
 	_, cluster.trackerClose = mainTt.useContext("k3d_cluster")
 
-	if err := osExec(cmdCreateCluster(name, getOutboundIP())...); err != nil {
+	mp := NewManagedProc(cmdCreateCluster(name, getOutboundIP())...)
+	if err := mp.Run(); err != nil {
 		return nil, err
 	}
 	//TODO: set -x KUBECONFIG /tmp/k3d--argo-cd--argo-clstr--kubeconfig.yaml
@@ -47,14 +48,15 @@ func startK3dCluster(name string) (c *kubeCluster, err error) {
 	//
 	//TODO: oc kubeCluster-info
 
-	if err := osExec("kubectl", "create", "namespace", "argocd"); err != nil {
+	mp = NewManagedProc("kubectl", "create", "namespace", "argocd")
+	if err := mp.Run(); err != nil {
 		return nil, err
 	}
-	//if err := osExec("kubectl", "config", "set-context", "--current", "--namespace=argocd"); err != nil {
-	//	return err
-	//}
 
-	//TODO kubectl project argocd; is it needed?
+	mp = NewManagedProc("kubectl", "config", "set-context", "--current", "--namespace=argocd")
+	if err := mp.Run(); err != nil {
+		return nil, err
+	}
 
 	return cluster, nil
 }

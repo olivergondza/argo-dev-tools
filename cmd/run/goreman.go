@@ -15,16 +15,12 @@ var (
 )
 
 func osExecGoreman(args ...string) error {
-	mp := newManagedProc(args...)
+	mp := NewManagedProc(args...)
 	mp.stdoutTransformer = stdoutTransformer
-	if err := mp.run(); err != nil {
-		return err
-	}
-
-	return nil
+	return mp.Run()
 }
 
-func stdoutTransformer(in string) string {
+func stdoutTransformer(in string) *string {
 	const sep = `{"`
 
 	out := in
@@ -35,7 +31,7 @@ func stdoutTransformer(in string) string {
 		if json.Unmarshal([]byte(after), &obj) == nil {
 			f := colorjson.NewFormatter()
 			if level, ok := obj["level"]; ok {
-				if level == "error" {
+				if level == "error" || level == "fatal" || level == "panic" {
 					f.StringColor = colorError
 				} else if level == "warning" {
 					f.StringColor = colorWarn
@@ -54,7 +50,7 @@ func stdoutTransformer(in string) string {
 	out = highlight(out, "level=error", colorErrorSprintf)
 	out = highlight(out, "level=warning", colorWarnSprintf)
 
-	return out
+	return &out
 }
 
 func highlight(in string, search string, color func(a ...interface{}) string) string {
