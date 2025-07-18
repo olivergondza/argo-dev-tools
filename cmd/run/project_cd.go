@@ -1,13 +1,17 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 )
+
+func init() {
+	projectRegistry["cd"] = projectCd{}
+}
 
 type projectCd struct {
 }
@@ -37,21 +41,13 @@ func (c cdLocal) Run() error {
 	defer cluster.Close()
 
 	// oc -n argocd apply -f manifests/install.yaml
-	if err := kubectl("apply", "-f", "manifests/install.yaml").Run(); err != nil {
+	if err := cluster.Kubectl("apply", "-f", "manifests/install.yaml").Run(); err != nil {
 		return fmt.Errorf("failed deploying argo-cd manifests: %s", err)
 	}
 
-	for {
-		_, err := getInitialArgoCdAdminSecret()
-		if err == nil {
-			break
-		}
+	argoCdSecret := c.waitForArgoCdAdminSecret(cluster)
 
-		out(os.Stderr, "Waiting for Argo CD initialized...")
-		time.Sleep(5 * time.Second)
-	}
-
-	err = scaleToZero(
+	err = cluster.scaleToZero(
 		"statefulset/argocd-application-controller",
 		"deployment/argocd-dex-server",
 		"deployment/argocd-repo-server",
@@ -62,11 +58,6 @@ func (c cdLocal) Run() error {
 	)
 	if err != nil {
 		return err
-	}
-
-	argoCdSecret, err := getInitialArgoCdAdminSecret()
-	if err != nil {
-		return fmt.Errorf("failed getting Argo CD admin secret: %s", err)
 	}
 
 	cmd := exec.Command("xclip")
@@ -94,9 +85,21 @@ func (c cdLocal) Run() error {
 	return nil
 }
 
+func (c cdLocal) waitForArgoCdAdminSecret(cluster *kubeCluster) string {
+	for {
+		secret, err := cluster.getInitialArgoCdAdminSecret()
+		if err == nil {
+			return secret
+		}
+
+		out(os.Stderr, "Waiting for Argo CD initialized...")
+		time.Sleep(5 * time.Second)
+	}
+}
+
 func authenticateArgocdCli(secret string) {
 	for {
-		mp := NewManagedProc("./dist/argocd", "login", "localhost:8080", "--username=admin", "--password="+secret)
+		mp := NewManagedProc("./dist/argocd", "login", "--plaintext", "localhost:8080", "--username=admin", "--password="+secret)
 		err := mp.Run()
 		if err == nil {
 			break
@@ -109,8 +112,8 @@ func authenticateArgocdCli(secret string) {
 	out(os.Stderr, "./dist/argocd logged in!")
 }
 
-func getInitialArgoCdAdminSecret() (string, error) {
-	proc := kubectl(
+func (c *kubeCluster) getInitialArgoCdAdminSecret() (string, error) {
+	proc := c.Kubectl(
 		"get", "secret", "argocd-initial-admin-secret",
 		"-o", "jsonpath={.data.password}",
 	)
@@ -120,12 +123,17 @@ func getInitialArgoCdAdminSecret() (string, error) {
 		return "", err
 	}
 
-	return stdoutBuffer.String(), nil
+	decoded, err := base64.StdEncoding.DecodeString(stdoutBuffer.String())
+	if err != nil {
+		return "", err
+	}
+
+	return string(decoded), nil
 }
 
-func scaleToZero(resources ...string) error {
+func (c *kubeCluster) scaleToZero(resources ...string) error {
 	for _, resource := range resources {
-		if err := kubectl("scale", resource, "--replicas", "0").Run(); err != nil {
+		if err := c.Kubectl("scale", resource, "--replicas", "0").Run(); err != nil {
 			return fmt.Errorf("failed scaling down %s in the dummy Argo CD deployment: %v", resource, err)
 		}
 	}
@@ -166,37 +174,4 @@ func (c cdE2e) Run() error {
 
 func (c cdE2e) Name() string {
 	return "e2e"
-}
-
-func init() {
-	projectRegistry["cd"] = projectCd{}
-}
-
-func startCluster() (*kubeCluster, error) {
-	err := checkMarker("Makefile", regexp.MustCompile("^PACKAGE=github.com/argoproj/argo-cd/"))
-	if err != nil {
-		return nil, err
-	}
-	if wasInterrupted() {
-		return nil, nil
-	}
-
-	err = checkDocker()
-	if err != nil {
-		return nil, err
-	}
-	if wasInterrupted() {
-		return nil, nil
-	}
-
-	cluster, err := startK3dCluster("argo-dev-tools")
-	if err != nil {
-		return nil, err
-	}
-	return cluster, nil
-}
-
-func kubectl(args ...string) *ManagedProc {
-	args = append([]string{"kubectl", "-n", "argocd"}, args...)
-	return NewManagedProc(args...)
 }
