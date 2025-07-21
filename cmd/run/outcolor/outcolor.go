@@ -1,9 +1,11 @@
-package main
+package outcolor
 
 import (
 	"encoding/json"
 	"github.com/TylerBrock/colorjson"
+	"github.com/argoproj/dev-tools/cmd/run"
 	"github.com/fatih/color"
+	"os"
 	"strings"
 )
 
@@ -14,13 +16,7 @@ var (
 	colorWarnSprintf  = colorWarn.SprintFunc()
 )
 
-func osExecGoreman(args ...string) error {
-	mp := NewManagedProc(args...)
-	mp.stdoutTransformer = stdoutTransformer
-	return mp.Run()
-}
-
-func stdoutTransformer(in string) *string {
+func ColorizeGoreman(in string) *string {
 	const sep = `{"`
 
 	out := in
@@ -46,11 +42,15 @@ func stdoutTransformer(in string) *string {
 		}
 	}
 
-	// Colorize levels in field output
-	out = highlight(out, "level=error", colorErrorSprintf)
-	out = highlight(out, "level=warning", colorWarnSprintf)
+	return ColorizeGoLog(out)
+}
 
-	return &out
+func ColorizeGoLog(str string) *string {
+	run.Out(os.Stderr, "ColorizeGoLog: "+str)
+	// Colorize levels in field output
+	str = highlight(str, "level=error", colorErrorSprintf)
+	str = highlight(str, "level=warning", colorWarnSprintf)
+	return &str
 }
 
 func highlight(in string, search string, color func(a ...interface{}) string) string {

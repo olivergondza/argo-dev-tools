@@ -1,4 +1,4 @@
-package main
+package run
 
 import (
 	"bufio"
@@ -20,7 +20,8 @@ type lineTransformer func(in string) *string
 type ManagedProc struct {
 	visual            string
 	cmd               *exec.Cmd
-	stdoutTransformer lineTransformer
+	StdoutTransformer lineTransformer
+	StderrTransformer lineTransformer
 
 	releaseContextTask func()
 	status             managedProcStatus
@@ -38,7 +39,7 @@ func NewManagedProc(args ...string) *ManagedProc {
 	args = args[1:]
 
 	var ctx context.Context
-	ctx, mp.releaseContextTask = mainTt.useContext("process-" + mp.visual)
+	ctx, mp.releaseContextTask = MainTt.UseContext("process-" + mp.visual)
 	mp.cmd = exec.CommandContext(ctx, command, args...)
 
 	// Start all children processes in one process group to deliver the SIGTERM in one go.
@@ -62,7 +63,7 @@ func NewManagedProc(args ...string) *ManagedProc {
 
 func (mp *ManagedProc) CaptureStdout() *bytes.Buffer {
 	buffer := new(bytes.Buffer)
-	mp.stdoutTransformer = func(in string) *string {
+	mp.StdoutTransformer = func(in string) *string {
 		buffer.WriteString(in)
 		return nil
 	}
@@ -107,8 +108,9 @@ func (mp *ManagedProc) pumpOutputs() (*sync.WaitGroup, error) {
 	if err != nil {
 		return nil, err
 	}
-	outPump := &streamPump{outPipe, os.Stdout, mp.stdoutTransformer, &wg}
-	errPump := &streamPump{errPipe, os.Stderr, nil, &wg}
+	Out(os.Stderr, "managedProcess: StdoutTransformer: %v; StderrTransformer: %v", mp.StdoutTransformer, mp.StderrTransformer)
+	outPump := &streamPump{outPipe, os.Stdout, mp.StdoutTransformer, &wg}
+	errPump := &streamPump{errPipe, os.Stderr, mp.StderrTransformer, &wg}
 	go outPump.pump()
 	go errPump.pump()
 	return &wg, err
@@ -120,7 +122,7 @@ func (mp *ManagedProc) String() string {
 
 func (mp *ManagedProc) update(status managedProcStatus) {
 	mp.status = status
-	out(os.Stderr, "managedProcess: %v", mp)
+	Out(os.Stderr, "managedProcess: %v", mp)
 }
 
 type streamPump struct {
@@ -150,6 +152,6 @@ func (sp *streamPump) pump() {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		out(os.Stderr, "Error reading from pipe: %v", err)
+		Out(os.Stderr, "Error reading from pipe: %v", err)
 	}
 }

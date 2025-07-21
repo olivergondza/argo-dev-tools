@@ -1,4 +1,4 @@
-package main
+package run
 
 import (
 	"bufio"
@@ -9,9 +9,9 @@ import (
 	"regexp"
 )
 
-// checkMarker checks if a regular file exists at filePath
+// CheckMarker checks if a regular file exists at filePath
 // and contains at least one line matching regexPattern.
-func checkMarker(filePath string, regexPattern *regexp.Regexp) error {
+func CheckMarker(filePath string, regexPattern *regexp.Regexp) error {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -44,7 +44,7 @@ func checkMarker(filePath string, regexPattern *regexp.Regexp) error {
 	return fmt.Errorf("not Run from project directory")
 }
 
-func checkDocker() error {
+func CheckDocker() error {
 	mp := NewManagedProc([]string{"docker", "ps"}...)
 	if err := mp.Run(); err != nil {
 		return fmt.Errorf("docker not running: %s", err)
@@ -53,8 +53,8 @@ func checkDocker() error {
 	return nil
 }
 
-// getOutboundIP returns the preferred outbound IP for connecting to the internet.
-func getOutboundIP() string {
+// GetOutboundIP returns the preferred outbound IP for connecting to the internet.
+func GetOutboundIP() string {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
 		log.Fatal(err)

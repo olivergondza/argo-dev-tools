@@ -1,4 +1,4 @@
-package main
+package run
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-var mainTt *taskTracker
+var MainTt *taskTracker
 
 type taskTracker struct {
 	ctx    context.Context
@@ -16,18 +16,18 @@ type taskTracker struct {
 	count  *sync.WaitGroup
 }
 
-func (t *taskTracker) useContext(name string) (context.Context, func()) {
+func (t *taskTracker) UseContext(name string) (context.Context, func()) {
 	t.count.Add(1)
-	out(os.Stderr, "CONTEXT USED "+name)
+	Out(os.Stderr, "CONTEXT USED "+name)
 	return t.ctx, func() {
-		out(os.Stderr, "CONTEXT RETURNED "+name)
+		Out(os.Stderr, "CONTEXT RETURNED "+name)
 		t.count.Done()
 	}
 }
 
-func wasInterrupted() bool {
+func WasInterrupted() bool {
 	select {
-	case <-mainTt.ctx.Done():
+	case <-MainTt.ctx.Done():
 		return true
 	default:
 		return false
@@ -36,7 +36,7 @@ func wasInterrupted() bool {
 
 func init() {
 	ctx, cancel := context.WithCancel(context.Background())
-	mainTt = &taskTracker{ctx, cancel, &sync.WaitGroup{}}
+	MainTt = &taskTracker{ctx, cancel, &sync.WaitGroup{}}
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
@@ -45,12 +45,12 @@ func init() {
 
 func onSignal(signals chan os.Signal) {
 	sig := <-signals
-	out(os.Stderr, "Caught signal %v", sig)
+	Out(os.Stderr, "Caught signal %v", sig)
 
-	mainTt.cancel()
-	out(os.Stderr, "Waiting for tasks to complete")
-	mainTt.count.Wait()
-	out(os.Stderr, "All tasks completed")
+	MainTt.cancel()
+	Out(os.Stderr, "Waiting for tasks to complete")
+	MainTt.count.Wait()
+	Out(os.Stderr, "All tasks completed")
 
 	os.Exit(42)
 }
