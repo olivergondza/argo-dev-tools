@@ -1,8 +1,8 @@
 package project
 
 import (
-	"github.com/argoproj/dev-tools/cmd/run"
 	"github.com/argoproj/dev-tools/cmd/run/cluster"
+	"github.com/argoproj/dev-tools/cmd/run/run"
 )
 
 func startCluster(ns string) (*cluster.KubeCluster, error) {

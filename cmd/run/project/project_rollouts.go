@@ -1,8 +1,8 @@
 package project
 
 import (
-	"github.com/argoproj/dev-tools/cmd/run"
 	"github.com/argoproj/dev-tools/cmd/run/outcolor"
+	"github.com/argoproj/dev-tools/cmd/run/run"
 	"regexp"
 )
 

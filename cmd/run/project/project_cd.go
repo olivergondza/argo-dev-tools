@@ -3,9 +3,9 @@ package project
 import (
 	"encoding/base64"
 	"fmt"
-	"github.com/argoproj/dev-tools/cmd/run"
 	"github.com/argoproj/dev-tools/cmd/run/cluster"
 	"github.com/argoproj/dev-tools/cmd/run/outcolor"
+	"github.com/argoproj/dev-tools/cmd/run/run"
 	"os"
 	"os/exec"
 	"regexp"

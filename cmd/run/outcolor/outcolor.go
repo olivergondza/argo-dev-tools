@@ -3,9 +3,7 @@ package outcolor
 import (
 	"encoding/json"
 	"github.com/TylerBrock/colorjson"
-	"github.com/argoproj/dev-tools/cmd/run"
 	"github.com/fatih/color"
-	"os"
 	"strings"
 )
 
@@ -46,7 +44,6 @@ func ColorizeGoreman(in string) *string {
 }
 
 func ColorizeGoLog(str string) *string {
-	run.Out(os.Stderr, "ColorizeGoLog: "+str)
 	// Colorize levels in field output
 	str = highlight(str, "level=error", colorErrorSprintf)
 	str = highlight(str, "level=warning", colorWarnSprintf)
@@ -55,4 +52,14 @@ func ColorizeGoLog(str string) *string {
 
 func highlight(in string, search string, color func(a ...interface{}) string) string {
 	return strings.ReplaceAll(in, search, color(search))
+}
+
+type coloredString struct {
+	value string
+	color *color.Color
+}
+
+func (s coloredString) MarshalJSON() ([]byte, error) {
+	//return []byte(s.color.Sprintf("\"%s\"", s.value)), nil
+	return []byte("\"" + s.value + "\""), nil
 }

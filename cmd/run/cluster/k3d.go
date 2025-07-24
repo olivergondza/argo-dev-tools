@@ -1,7 +1,7 @@
 package cluster
 
 import (
-	"github.com/argoproj/dev-tools/cmd/run"
+	"github.com/argoproj/dev-tools/cmd/run/run"
 	"os"
 	"os/exec"
 )

@@ -9,6 +9,25 @@ import (
 	"regexp"
 )
 
+type Project interface {
+	Name() string
+	CheckRepo() error
+	Commands() []ProjectCommand
+}
+
+type ProjectCommand interface {
+	Name() string
+	Run() error
+}
+
+var ProjectRegistry = make(map[string]Project)
+
+func Out(file *os.File, msg string, fmtArgs ...any) {
+	if _, err := fmt.Fprintf(file, msg+"\n", fmtArgs...); err != nil {
+		panic(err)
+	}
+}
+
 // CheckMarker checks if a regular file exists at filePath
 // and contains at least one line matching regexPattern.
 func CheckMarker(filePath string, regexPattern *regexp.Regexp) error {
