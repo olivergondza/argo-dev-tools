@@ -41,7 +41,7 @@ func (c rolloutsLocal) Run() error {
 	}
 	defer cluster.Close()
 
-	// TODO
+	panic("implement me")
 
 	return nil
 }
