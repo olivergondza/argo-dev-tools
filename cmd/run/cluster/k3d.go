@@ -7,14 +7,15 @@ import (
 )
 
 type KubeCluster struct {
-	name      string
-	namespace string
+	name        string
+	namespace   string
+	contextName string
 	// trackerClose prevents program completion on interrupt
 	trackerClose func()
 }
 
 func NewK3dCluster(name string) (c *KubeCluster, err error) {
-	cluster := &KubeCluster{name, "", func() {}}
+	cluster := &KubeCluster{name, "", "k3d-" + name, func() {}}
 	// Delete eventual leftovers from previous runs
 	cluster.Close()
 
@@ -50,13 +51,15 @@ func (c *KubeCluster) Close() {
 }
 
 func (c *KubeCluster) UseNs(ns string) error {
+	c.switchContextToThisCluster()
+
 	mp := run.NewManagedProc("kubectl", "create", "namespace", ns)
 	if err := mp.Run(); err != nil {
 		return err
 	}
 	c.namespace = ns
 
-	// Needed my the `make` targets
+	// Needed by the `make` targets
 	mp = run.NewManagedProc("kubectl", "config", "set-context", "--current", "--namespace="+ns)
 	if err := mp.Run(); err != nil {
 		return err
@@ -70,15 +73,24 @@ func (c *KubeCluster) newCreateProc(ip string) *run.ManagedProc {
 		"k3d", "cluster", "create", c.name,
 		"--wait",
 		"--k3s-arg", "--disable=traefik@server:*",
-		"--api-port", ip+":6550",
-		"-p", "443:443@loadbalancer",
+		//"--api-port", ip+":6550",
+		//"-p", "443:443@loadbalancer",
 	)
+}
+
+func (c *KubeCluster) switchContextToThisCluster() {
+	proc := run.NewManagedProc("kubectl", "config", "use-context", c.contextName)
+	if err := proc.Run(); err != nil {
+		panic(err)
+	}
 }
 
 func (c *KubeCluster) Kubectl(args ...string) *run.ManagedProc {
 	if c.namespace == "" {
 		panic("namespace not set for cluster " + c.name)
 	}
+
+	c.switchContextToThisCluster()
 
 	args = append([]string{"kubectl", "-n", c.namespace}, args...)
 	return run.NewManagedProc(args...)
