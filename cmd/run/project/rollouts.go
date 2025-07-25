@@ -65,11 +65,11 @@ func (c rolloutsE2e) Run() error {
 	}
 	defer cluster.Close()
 
-	if err = cluster.Kubectl("apply", "-k", "manifests/crds").Run(); err != nil {
+	if err = cluster.KubectlProc("apply", "-k", "manifests/crds").Run(); err != nil {
 		return err
 	}
 
-	if err = cluster.Kubectl("apply", "-f", "test/e2e/crds").Run(); err != nil {
+	if err = cluster.KubectlProc("apply", "-f", "test/e2e/crds").Run(); err != nil {
 		return err
 	}
 

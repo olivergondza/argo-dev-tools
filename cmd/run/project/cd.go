@@ -49,7 +49,7 @@ func (c cdLocal) Run() error {
 	defer cluster.Close()
 
 	// oc -n argocd apply -f manifests/install.yaml
-	if err := cluster.Kubectl("apply", "-f", "manifests/install.yaml").Run(); err != nil {
+	if err := cluster.KubectlProc("apply", "-f", "manifests/install.yaml").Run(); err != nil {
 		return fmt.Errorf("failed deploying argo-cd manifests: %s", err)
 	}
 
@@ -119,7 +119,7 @@ func authenticateArgocdCli(secret string) {
 }
 
 func getInitialArgoCdAdminSecret(c *cluster.KubeCluster) (string, error) {
-	proc := c.Kubectl(
+	proc := c.KubectlProc(
 		"get", "secret", "argocd-initial-admin-secret",
 		"-o", "jsonpath={.data.password}",
 	)
@@ -139,7 +139,7 @@ func getInitialArgoCdAdminSecret(c *cluster.KubeCluster) (string, error) {
 
 func scaleToZero(c *cluster.KubeCluster, resources ...string) error {
 	for _, resource := range resources {
-		if err := c.Kubectl("scale", resource, "--replicas", "0").Run(); err != nil {
+		if err := c.KubectlProc("scale", resource, "--replicas", "0").Run(); err != nil {
 			return fmt.Errorf("failed scaling down %s in the dummy Argo CD deployment: %v", resource, err)
 		}
 	}

@@ -2,6 +2,7 @@ package project
 
 import (
 	"github.com/argoproj/dev-tools/cmd/run/cluster"
+	"github.com/argoproj/dev-tools/cmd/run/project/agent"
 	"github.com/argoproj/dev-tools/cmd/run/run"
 	"os"
 	"regexp"
@@ -32,7 +33,7 @@ func (p projectAgent) CheckRepo() error {
 type agentLocal struct{}
 
 func (c agentLocal) Run() error {
-	grid, err := startClusters()
+	grid, err := agent.NewGrid()
 	if err != nil {
 		return err
 	}
@@ -41,6 +42,31 @@ func (c agentLocal) Run() error {
 		return nil
 	}
 	defer grid.Close()
+	grid.PrintDetails()
+
+	manifests, err := agent.NewManifests("./hack/dev-env/")
+	if err != nil {
+		return err
+	}
+
+	// TODO manifest modifications
+
+	err = grid.DeployArgos(manifests)
+	if err != nil {
+		return err
+	}
+
+	// TODO
+	if err := run.NewManagedProc("sleep", "inf").Run(); err != nil {
+		return err
+	}
+
+	err = c.startPrincipal(grid)
+	if err != nil {
+		return err
+	}
+
+	c.deployTestApps(grid)
 
 	return nil
 }
@@ -62,60 +88,52 @@ func (c agentLocal) Name() string {
 	return "local"
 }
 
-type agentClusterGrid struct {
-	principal  *cluster.KubeCluster
-	managed    *cluster.KubeCluster
-	autonomous *cluster.KubeCluster
+func (c agentLocal) deployTestApps(grid *agent.Grid) {
+	grid.Managed.KubectlProc("apply", "-f", "./hack/dev-env/apps/managed-guestbook.yaml")
+	grid.Autonomous.KubectlProc("apply", "-f", "./hack/dev-env/apps/autonomous-guestbook.yaml")
 }
 
-func (c agentClusterGrid) Close() {
-	if c.managed != nil {
-		c.managed.Close()
-	}
-	if c.autonomous != nil {
-		c.autonomous.Close()
-	}
-	if c.principal != nil {
-		c.principal.Close()
-	}
-}
-
-// startCluster start all the clusters needed for the grid
-// It returns either all the clusters up, so users is responsible to Close() after, or no cluster up at all
-func startClusters() (*agentClusterGrid, error) {
-	var err error
-	acg := &agentClusterGrid{}
-
-	err = run.CheckDocker()
+func (c agentLocal) startPrincipal(grid *agent.Grid) error {
+	principalRedisAddress, err := c.redisAddress(grid)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	acg.principal, err = cluster.NewK3dCluster("argocd-agent-control-plane")
-	if err != nil || acg.principal == nil {
-		return nil, err
-	}
+	proc := run.NewManagedProc(
+		"go",
+		"run",
+		"github.com/argoproj-labs/argocd-agent/cmd/argocd-agent",
+		"principal",
+		"--allowed-namespaces='*'",
+		"--kubecontext="+grid.Principal.ContextName,
+		"--namespace="+grid.Principal.Namespace,
+		"--auth=mtls:CN=([^,]+)",
+	)
+	proc.AddEnv("ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS", principalRedisAddress)
+	return proc.Run()
+}
 
-	acg.managed, err = cluster.NewK3dCluster("argocd-agent-managed")
-	if err != nil || acg.managed == nil {
-		acg.principal.Close()
-		return nil, err
+func (c agentLocal) redisAddress(grid *agent.Grid) (string, error) {
+	json, err := grid.Principal.KubectlGetJson("svc", "argocd-redis")
+	if err != nil {
+		return "", err
 	}
-
-	acg.autonomous, err = cluster.NewK3dCluster("argocd-agent-principal")
-	if err != nil || acg.autonomous == nil {
-		acg.principal.Close()
-		acg.managed.Close()
-		return nil, err
+	found, err := json.SeekTo("status", "loadBalancer", "ingress", 0, "ip")
+	if err != nil {
+		return "", err
 	}
-
-	for _, kubeCluster := range []*cluster.KubeCluster{acg.principal, acg.autonomous, acg.managed} {
-		err := kubeCluster.UseNs("argocd-agent")
+	if !found {
+		found, err = json.SeekTo("status", "loadBalancer", "ingress", 0, "hostname")
 		if err != nil {
-			acg.Close()
-			return nil, err
+			return "", err
 		}
 	}
 
-	return acg, nil
+	var ipOrHost string
+	err = json.Decode(&ipOrHost)
+	if err != nil {
+		return "", err
+	}
+
+	return ipOrHost + ":6379", nil
 }

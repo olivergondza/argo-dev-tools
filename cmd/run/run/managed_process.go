@@ -70,6 +70,10 @@ func (mp *ManagedProc) CaptureStdout() *bytes.Buffer {
 	return buffer
 }
 
+func (mp *ManagedProc) AddEnv(key string, value string) {
+	mp.cmd.Env = append(mp.cmd.Env, key+"="+value)
+}
+
 func (mp *ManagedProc) Run() error {
 	outputsWritten, err := mp.pumpOutputs()
 	if err != nil {
@@ -108,7 +112,6 @@ func (mp *ManagedProc) pumpOutputs() (*sync.WaitGroup, error) {
 	if err != nil {
 		return nil, err
 	}
-	Out(os.Stderr, "managedProcess: StdoutTransformer: %v; StderrTransformer: %v", mp.StdoutTransformer, mp.StderrTransformer)
 	outPump := &streamPump{outPipe, os.Stdout, mp.StdoutTransformer, &wg}
 	errPump := &streamPump{errPipe, os.Stderr, mp.StderrTransformer, &wg}
 	go outPump.pump()
@@ -122,7 +125,6 @@ func (mp *ManagedProc) String() string {
 
 func (mp *ManagedProc) update(status managedProcStatus) {
 	mp.status = status
-	Out(os.Stderr, "managedProcess: %v", mp)
 }
 
 type streamPump struct {

@@ -1,15 +1,18 @@
 package cluster
 
 import (
+	"bytes"
 	"github.com/argoproj/dev-tools/cmd/run/run"
 	"os"
 	"os/exec"
+
+	"github.com/exponent-io/jsonpath"
 )
 
 type KubeCluster struct {
-	name        string
-	namespace   string
-	contextName string
+	Name        string
+	Namespace   string
+	ContextName string
 	// trackerClose prevents program completion on interrupt
 	trackerClose func()
 }
@@ -39,28 +42,36 @@ func NewK3dCluster(name string) (c *KubeCluster, err error) {
 }
 
 func (c *KubeCluster) Close() {
+	defer c.trackerClose()
+
 	run.Out(os.Stderr, "Closing KubeCluster")
 	// cannot use NewManagedProc - run after main context is cancelled
-	err := exec.Command("k3d", "cluster", "delete", c.name).Run()
+	err := exec.Command("k3d", "cluster", "delete", c.Name).Run()
 	if err != nil {
 		run.Out(os.Stderr, "Failed to close KubeCluster: %s", err)
 		return
 	}
 	run.Out(os.Stderr, "Closed KubeCluster")
-	c.trackerClose()
 }
 
-func (c *KubeCluster) UseNs(ns string) error {
-	c.switchContextToThisCluster()
-
-	mp := run.NewManagedProc("kubectl", "create", "namespace", ns)
+func (c *KubeCluster) CreateNs(ns string) error {
+	mp := run.NewManagedProc("kubectl", "--context", c.ContextName, "create", "namespace", ns)
 	if err := mp.Run(); err != nil {
 		return err
 	}
-	c.namespace = ns
+	c.Namespace = ns
+
+	return nil
+}
+
+func (c *KubeCluster) UseNs(ns string) error {
+	if c.Namespace == "" {
+		panic("namespace not set for cluster " + c.Name)
+	}
+	c.Namespace = ns
 
 	// Needed by the `make` targets
-	mp = run.NewManagedProc("kubectl", "config", "set-context", "--current", "--namespace="+ns)
+	mp := run.NewManagedProc("kubectl", "config", "set-context", "--current", "--namespace="+ns)
 	if err := mp.Run(); err != nil {
 		return err
 	}
@@ -70,7 +81,7 @@ func (c *KubeCluster) UseNs(ns string) error {
 
 func (c *KubeCluster) newCreateProc(ip string) *run.ManagedProc {
 	return run.NewManagedProc(
-		"k3d", "cluster", "create", c.name,
+		"k3d", "cluster", "create", c.Name,
 		"--wait",
 		"--k3s-arg", "--disable=traefik@server:*",
 		//"--api-port", ip+":6550",
@@ -78,20 +89,25 @@ func (c *KubeCluster) newCreateProc(ip string) *run.ManagedProc {
 	)
 }
 
-func (c *KubeCluster) switchContextToThisCluster() {
-	proc := run.NewManagedProc("kubectl", "config", "use-context", c.contextName)
-	if err := proc.Run(); err != nil {
-		panic(err)
+func (c *KubeCluster) KubectlProc(args ...string) *run.ManagedProc {
+	if c.Namespace == "" {
+		panic("namespace not set for cluster " + c.Name)
 	}
+
+	args = append([]string{"kubectl", "--context", c.ContextName, "-n", c.Namespace}, args...)
+	return run.NewManagedProc(args...)
 }
 
-func (c *KubeCluster) Kubectl(args ...string) *run.ManagedProc {
-	if c.namespace == "" {
-		panic("namespace not set for cluster " + c.name)
+func (c *KubeCluster) KubectlGetJson(args ...string) (*jsonpath.Decoder, error) {
+	args = append(args, "get", "--output=json")
+	proc := c.KubectlProc(args...)
+	stdout := proc.CaptureStdout()
+
+	err := proc.Run()
+	if err != nil {
+		return nil, err
 	}
 
-	c.switchContextToThisCluster()
-
-	args = append([]string{"kubectl", "-n", c.namespace}, args...)
-	return run.NewManagedProc(args...)
+	reader := bytes.NewReader(stdout.Bytes())
+	return jsonpath.NewDecoder(reader), nil
 }

@@ -18,6 +18,10 @@ func startCluster(ns string) (*cluster.KubeCluster, error) {
 	if err != nil {
 		return nil, err
 	}
+	err = cluster.CreateNs(ns)
+	if err != nil {
+		return nil, err
+	}
 	err = cluster.UseNs(ns)
 	if err != nil {
 		return nil, err
