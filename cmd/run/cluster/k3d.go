@@ -140,8 +140,8 @@ func (c *KubeCluster) WaitForAllPodsRunning() error {
 
 		run.Out(
 			os.Stderr, "Waiting for all pods to be running in %s. Waiting on:\n- %v",
-			c.Name, strings.Join(problems, "- \n"),
+			c.Name, strings.Join(problems, "- "),
 		)
-		time.Sleep(10 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 }

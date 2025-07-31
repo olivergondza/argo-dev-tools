@@ -249,6 +249,7 @@ func (m *Manifests) GenerateAccountSecrets() error {
 	for _, account := range accounts {
 		pwd := password.MustGenerate(64, 10, 10, false, true)
 		proc := run.NewManagedProc("htpasswd", "-b", "-B", controlPlane, account, pwd)
+		proc.Mask(pwd)
 		if err = proc.Run(); err != nil {
 			return err
 		}

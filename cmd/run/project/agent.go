@@ -1,6 +1,7 @@
 package project
 
 import (
+	"github.com/argoproj/dev-tools/cmd/run/cluster"
 	"github.com/argoproj/dev-tools/cmd/run/project/agent"
 	"github.com/argoproj/dev-tools/cmd/run/run"
 	"regexp"
@@ -29,11 +30,11 @@ func (p projectAgent) CheckRepo() error {
 
 type agentLocal struct{}
 
-func (c agentLocal) Name() string {
+func (al agentLocal) Name() string {
 	return "local"
 }
 
-func (c agentLocal) Run() error {
+func (al agentLocal) Run() error {
 	grid, err := agent.NewGrid()
 	if err != nil {
 		return err
@@ -43,7 +44,6 @@ func (c agentLocal) Run() error {
 		return nil
 	}
 	defer func() {
-		grid.PrintDetails(true)
 		grid.Close()
 	}()
 	grid.PrintDetails(false)
@@ -66,6 +66,7 @@ func (c agentLocal) Run() error {
 
 	err = grid.DeployControlPlane(manifests)
 	if err != nil {
+		grid.PrintDetails(true)
 		return err
 	}
 	err = manifests.InjectManagedAddresses("argocd-redis", "192.168.56.222")
@@ -74,27 +75,35 @@ func (c agentLocal) Run() error {
 	}
 	err = grid.DeployAgents(manifests)
 	if err != nil {
+		grid.PrintDetails(true)
 		return err
 	}
 	err = manifests.GenerateAccountSecrets()
 	if err != nil {
 		return err
 	}
-	err = grid.WaitForAllPodsRunning()
-	if err != nil {
-		return err
-	}
-
-	_, err = c.startPrincipal(grid)
+	err = al.createPkiConfig(grid)
 	if err != nil {
 		return err
 	}
 	err = grid.WaitForAllPodsRunning()
 	if err != nil {
+		grid.PrintDetails(true)
 		return err
 	}
 
-	c.deployTestApps(grid)
+	_, err = al.startPrincipal(grid)
+	if err != nil {
+		grid.PrintDetails(true)
+		return err
+	}
+	err = grid.WaitForAllPodsRunning()
+	if err != nil {
+		grid.PrintDetails(true)
+		return err
+	}
+
+	al.deployTestApps(grid)
 
 	// TODO
 	if err := run.NewManagedProc("sleep", "inf").Run(); err != nil {
@@ -104,12 +113,12 @@ func (c agentLocal) Run() error {
 	return nil
 }
 
-func (c agentLocal) deployTestApps(grid *agent.Grid) {
+func (al agentLocal) deployTestApps(grid *agent.Grid) {
 	grid.Managed.KubectlProc("apply", "-f", "./hack/dev-env/apps/managed-guestbook.yaml")
 	grid.Autonomous.KubectlProc("apply", "-f", "./hack/dev-env/apps/autonomous-guestbook.yaml")
 }
 
-func (c agentLocal) startPrincipal(grid *agent.Grid) (string, error) {
+func (al agentLocal) startPrincipal(grid *agent.Grid) (string, error) {
 	principalRedisAddress, err := principalRedisAddress(grid)
 	if err != nil {
 		return "", err
@@ -121,8 +130,8 @@ func (c agentLocal) startPrincipal(grid *agent.Grid) (string, error) {
 		"github.com/argoproj-labs/argocd-agent/cmd/argocd-agent",
 		"principal",
 		"--allowed-namespaces='*'",
-		"--kubecontext="+grid.Principal.ContextName,
-		"--namespace="+grid.Principal.Namespace,
+		"--kubecontext="+grid.ControlPlane.ContextName,
+		"--namespace="+grid.ControlPlane.Namespace,
 		// TODO: Not sure if really not needed.
 		// Avoids: [FATAL]: Error reading TLS config for resource proxy: error getting proxy certificate: could not read TLS secret argocd-agent-control-plane/argocd-agent-resource-proxy-tls: secrets "argocd-agent-resource-proxy-tls" not found
 		"--enable-resource-proxy=false",
@@ -132,8 +141,83 @@ func (c agentLocal) startPrincipal(grid *agent.Grid) (string, error) {
 	return principalRedisAddress, proc.Run()
 }
 
+func (al agentLocal) createPkiConfig(grid *agent.Grid) error {
+	ip := run.GetOutboundIP()
+	agentctl := "./dist/argocd-agentctl"
+	var err error
+
+	// Seems that `agentctl pki issue` have this NS hardcoded
+	//err = grid.ControlPlane.CreateNs("argocd")
+	//if err != nil {
+	//	return err
+	//}
+	proc := run.NewManagedProc(
+		agentctl, "pki", "init", "--force",
+		"--principal-context", grid.ControlPlane.ContextName,
+		"--principal-namespace", grid.ControlPlane.Namespace,
+	)
+	if err = proc.Run(); err != nil {
+		return err
+	}
+
+	proc = run.NewManagedProc(
+		agentctl, "pki", "issue", "principal", "--upsert",
+		"--principal-context", grid.ControlPlane.ContextName,
+		"--principal-namespace", grid.ControlPlane.Namespace,
+		"--ip", "127.0.0.1,"+ip,
+	)
+	if err = proc.Run(); err != nil {
+		return err
+	}
+	proc = run.NewManagedProc(
+		agentctl, "pki", "issue", "resource-proxy", "--upsert",
+		"--principal-context", grid.ControlPlane.ContextName,
+		"--principal-namespace", grid.ControlPlane.Namespace,
+		"--ip", "127.0.0.1,"+ip,
+	)
+	if err = proc.Run(); err != nil {
+		return err
+	}
+	proc = run.NewManagedProc(
+		agentctl, "jwt", "create-key", "--upsert",
+		"--principal-context", grid.ControlPlane.ContextName,
+		"--principal-namespace", grid.ControlPlane.Namespace,
+	)
+	if err = proc.Run(); err != nil {
+		return err
+	}
+
+	n2c := map[string]*cluster.KubeCluster{
+		"agent-managed":    grid.Managed,
+		"agent-autonomous": grid.Autonomous,
+	}
+	for agentName, cluster := range n2c {
+		proc = run.NewManagedProc(
+			agentctl, "agent", "create", agentName,
+			"--resource-proxy-username", agentName,
+			"--resource-proxy-password", agentName,
+			"--resource-proxy-server", ip+":9090",
+			"--agent-context", cluster.ContextName,
+			"--agent-namespace", cluster.Namespace,
+		)
+		if err = proc.Run(); err != nil {
+			return err
+		}
+		proc = run.NewManagedProc(
+			agentctl, "pki", "issue", "agent", agentName,
+			"--agent-context", cluster.ContextName,
+			"--agent-namespace", cluster.Namespace,
+			"--upsert",
+		)
+		if err = proc.Run(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func principalRedisAddress(grid *agent.Grid) (string, error) {
-	json, err := grid.Principal.KubectlGetJson("svc", "argocd-redis")
+	json, err := grid.ControlPlane.KubectlGetJson("svc", "argocd-redis")
 	if err != nil {
 		return "", err
 	}

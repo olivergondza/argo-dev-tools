@@ -16,9 +16,9 @@ var (
 )
 
 type Grid struct {
-	Principal  *cluster.KubeCluster
-	Managed    *cluster.KubeCluster
-	Autonomous *cluster.KubeCluster
+	ControlPlane *cluster.KubeCluster
+	Managed      *cluster.KubeCluster
+	Autonomous   *cluster.KubeCluster
 }
 
 func (g *Grid) Close() {
@@ -28,8 +28,8 @@ func (g *Grid) Close() {
 	if g.Autonomous != nil {
 		g.Autonomous.Close()
 	}
-	if g.Principal != nil {
-		g.Principal.Close()
+	if g.ControlPlane != nil {
+		g.ControlPlane.Close()
 	}
 }
 
@@ -45,7 +45,7 @@ func NewGrid() (*Grid, error) {
 	var wg sync.WaitGroup
 	acg := &Grid{}
 	clusters := map[string]func(kubeCluster *cluster.KubeCluster){
-		"argocd-agent-control-plane": func(c *cluster.KubeCluster) { acg.Principal = c },
+		"argocd-agent-control-plane": func(c *cluster.KubeCluster) { acg.ControlPlane = c },
 		"argocd-agent-managed":       func(c *cluster.KubeCluster) { acg.Managed = c },
 		"argocd-agent-autonomous":    func(c *cluster.KubeCluster) { acg.Autonomous = c },
 	}
@@ -69,8 +69,8 @@ func NewGrid() (*Grid, error) {
 				return
 			}
 			setter(clstr)
-			// Putting cluster name as NS name, so error messages not mentioning cluster identity can be attributed to a given environment.
-			err = clstr.CreateNs(clusterName)
+			// Seems that `agentctl pki issue` have this NS hardcoded
+			err = clstr.CreateNs("argocd")
 			if err != nil {
 				errorChan <- err
 				return
@@ -124,13 +124,13 @@ func (g *Grid) PrintDetails(verbose bool) {
 		}
 	}
 
-	header(g.Principal)
+	header(g.ControlPlane)
 	header(g.Autonomous)
 	header(g.Managed)
 }
 
 func (g *Grid) DeployControlPlane(manifests *Manifests) error {
-	err := doubleApply(g.Principal, "apply", "-k", manifests.Path("/control-plane/"))
+	err := doubleApply(g.ControlPlane, "apply", "-k", manifests.Path("/control-plane/"))
 	if err != nil {
 		return err
 	}
@@ -183,7 +183,7 @@ func (g *Grid) waitForRepoServerHostname() (string, error) {
 }
 
 func (g *Grid) getRepoServerHostname() (string, error) {
-	json, err := g.Principal.KubectlGetJson("svc", "argocd-repo-server")
+	json, err := g.ControlPlane.KubectlGetJson("svc", "argocd-repo-server")
 	if err != nil {
 		return "", err
 	}
@@ -210,7 +210,7 @@ func (g *Grid) WaitForAllPodsRunning() error {
 	var err error
 	go func() {
 		defer wg.Done()
-		err = g.Principal.WaitForAllPodsRunning()
+		err = g.ControlPlane.WaitForAllPodsRunning()
 	}()
 	go func() {
 		defer wg.Done()

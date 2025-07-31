@@ -18,10 +18,11 @@ import (
 type lineTransformer func(in string) *string
 
 type ManagedProc struct {
-	visual            string
+	args              []string
 	cmd               *exec.Cmd
 	StdoutTransformer lineTransformer
 	StderrTransformer lineTransformer
+	mask              []string
 
 	releaseContextTask func()
 	status             managedProcStatus
@@ -31,7 +32,7 @@ type managedProcStatus = string
 
 func NewManagedProc(args ...string) *ManagedProc {
 	mp := &ManagedProc{
-		visual: fmt.Sprintf("$ %s", strings.Join(args, " ")),
+		args: args,
 	}
 	mp.update("new") // Set status this way so the transition is logged
 
@@ -39,7 +40,7 @@ func NewManagedProc(args ...string) *ManagedProc {
 	args = args[1:]
 
 	var ctx context.Context
-	ctx, mp.releaseContextTask = MainTt.UseContext("process-" + mp.visual)
+	ctx, mp.releaseContextTask = MainTt.UseContext("process-" + mp.visual())
 	mp.cmd = exec.CommandContext(ctx, command, args...)
 
 	// Start all children processes in one process group to deliver the SIGTERM in one go.
@@ -75,6 +76,10 @@ func (mp *ManagedProc) Dir(cwd string) {
 	mp.cmd.Dir = cwd
 }
 
+func (mp *ManagedProc) Mask(private string) {
+	mp.mask = append(mp.mask, private)
+}
+
 func (mp *ManagedProc) AddEnv(key string, value string) {
 	if mp.cmd.Env == nil {
 		mp.cmd.Env = os.Environ()
@@ -83,7 +88,7 @@ func (mp *ManagedProc) AddEnv(key string, value string) {
 }
 
 func (mp *ManagedProc) Run() error {
-	Out(os.Stderr, mp.visual)
+	Out(os.Stderr, mp.visual())
 
 	outputsWritten, err := mp.pumpOutputs()
 	if err != nil {
@@ -130,11 +135,19 @@ func (mp *ManagedProc) pumpOutputs() (*sync.WaitGroup, error) {
 }
 
 func (mp *ManagedProc) String() string {
-	return fmt.Sprintf("%v: %s", mp.status, mp.visual)
+	return fmt.Sprintf("%v: %s", mp.status, mp.visual())
 }
 
 func (mp *ManagedProc) update(status managedProcStatus) {
 	mp.status = status
+}
+
+func (mp *ManagedProc) visual() string {
+	cmdline := strings.Join(mp.args, " ")
+	for _, secret := range mp.mask {
+		cmdline = strings.ReplaceAll(cmdline, secret, "*REDACTED*")
+	}
+	return fmt.Sprintf("$ %s", cmdline)
 }
 
 type streamPump struct {
