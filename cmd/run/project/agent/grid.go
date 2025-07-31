@@ -69,18 +69,28 @@ func NewGrid() (*Grid, error) {
 				return
 			}
 			setter(clstr)
-			// Seems that `agentctl pki issue` have this NS hardcoded
 			err = clstr.CreateNs("argocd")
 			if err != nil {
 				errorChan <- err
 				return
 			}
-
-			//proc := clstr.KubectlProc("apply", "-f", "https://raw.githubusercontent.com/metallb/metallb/refs/tags/v0.15.2/config/manifests/metallb-native.yaml")
+			err = clstr.UseNs("argocd")
+			if err != nil {
+				errorChan <- err
+				return
+			}
 		}()
 	}
 
 	wg.Wait()
+
+	// ControlPlane needs to have NS with name matching agent name
+	for clusterName, _ := range clusters {
+		err = acg.ControlPlane.CreateNs(clusterName)
+		if err != nil {
+			errorChan <- err
+		}
+	}
 
 	// channel must be closed before it can be iterated
 	// using loop as the channel is empty if all goes well

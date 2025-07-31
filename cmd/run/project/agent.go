@@ -5,6 +5,7 @@ import (
 	"github.com/argoproj/dev-tools/cmd/run/project/agent"
 	"github.com/argoproj/dev-tools/cmd/run/run"
 	"regexp"
+	"strconv"
 )
 
 func init() {
@@ -97,6 +98,9 @@ func (al agentLocal) Run() error {
 		grid.PrintDetails(true)
 		return err
 	}
+	al.startAgents(grid)
+
+	// TODO: Is is needed, al.start* start no pods?
 	err = grid.WaitForAllPodsRunning()
 	if err != nil {
 		grid.PrintDetails(true)
@@ -129,16 +133,51 @@ func (al agentLocal) startPrincipal(grid *agent.Grid) (string, error) {
 		"run",
 		"github.com/argoproj-labs/argocd-agent/cmd/argocd-agent",
 		"principal",
-		"--allowed-namespaces='*'",
+		"--allowed-namespaces=*",
 		"--kubecontext="+grid.ControlPlane.ContextName,
 		"--namespace="+grid.ControlPlane.Namespace,
-		// TODO: Not sure if really not needed.
-		// Avoids: [FATAL]: Error reading TLS config for resource proxy: error getting proxy certificate: could not read TLS secret argocd-agent-control-plane/argocd-agent-resource-proxy-tls: secrets "argocd-agent-resource-proxy-tls" not found
-		"--enable-resource-proxy=false",
+		"--log-level", "trace",
 		"--auth=mtls:CN=([^,]+)",
 	)
 	proc.AddEnv("ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS", principalRedisAddress)
-	return principalRedisAddress, proc.Run()
+
+	go func() {
+		err := proc.Run()
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	return principalRedisAddress, nil
+}
+
+func (al agentLocal) startAgents(grid *agent.Grid) {
+	portHealth := 8002
+	portMetrics := 8182
+	c2m := map[*cluster.KubeCluster]string{
+		grid.Autonomous: "autonomous",
+		grid.Managed:    "managed",
+	}
+	for kubeCluster, mode := range c2m {
+		proc := run.NewManagedProc(
+			"go", "run", "github.com/argoproj-labs/argocd-agent/cmd/argocd-agent",
+			"agent", "--agent-mode", mode,
+			"--creds=mtls:any",
+			"--server-address=127.0.0.1",
+			"--insecure-tls",
+			"--kubecontext", kubeCluster.ContextName,
+			"--namespace="+kubeCluster.Namespace,
+			"--log-level", "trace",
+			"--healthz-port", strconv.Itoa(portHealth),
+			"--metrics-port", strconv.Itoa(portMetrics),
+		)
+		go func() {
+			err := proc.Run()
+			if err != nil {
+				panic(err)
+			}
+		}()
+	}
 }
 
 func (al agentLocal) createPkiConfig(grid *agent.Grid) error {
@@ -146,15 +185,8 @@ func (al agentLocal) createPkiConfig(grid *agent.Grid) error {
 	agentctl := "./dist/argocd-agentctl"
 	var err error
 
-	// Seems that `agentctl pki issue` have this NS hardcoded
-	//err = grid.ControlPlane.CreateNs("argocd")
-	//if err != nil {
-	//	return err
-	//}
 	proc := run.NewManagedProc(
-		agentctl, "pki", "init", "--force",
-		"--principal-context", grid.ControlPlane.ContextName,
-		"--principal-namespace", grid.ControlPlane.Namespace,
+		agentctl, "pki", "init",
 	)
 	if err = proc.Run(); err != nil {
 		return err
@@ -191,14 +223,13 @@ func (al agentLocal) createPkiConfig(grid *agent.Grid) error {
 		"agent-managed":    grid.Managed,
 		"agent-autonomous": grid.Autonomous,
 	}
+
 	for agentName, cluster := range n2c {
 		proc = run.NewManagedProc(
 			agentctl, "agent", "create", agentName,
 			"--resource-proxy-username", agentName,
 			"--resource-proxy-password", agentName,
 			"--resource-proxy-server", ip+":9090",
-			"--agent-context", cluster.ContextName,
-			"--agent-namespace", cluster.Namespace,
 		)
 		if err = proc.Run(); err != nil {
 			return err

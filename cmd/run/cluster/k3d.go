@@ -61,15 +61,11 @@ func (c *KubeCluster) CreateNs(ns string) error {
 	if err := mp.Run(); err != nil {
 		return err
 	}
-	c.Namespace = ns
 
 	return nil
 }
 
 func (c *KubeCluster) UseNs(ns string) error {
-	if c.Namespace == "" {
-		panic("namespace not set for cluster " + c.Name)
-	}
 	c.Namespace = ns
 
 	// Needed by the `make` targets
