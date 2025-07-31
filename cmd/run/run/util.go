@@ -2,7 +2,9 @@ package run
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
+	"github.com/sethvargo/go-password/password"
 	"log"
 	"net"
 	"os"
@@ -82,4 +84,9 @@ func GetOutboundIP() string {
 
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	return localAddr.IP.String()
+}
+
+func RandomPwdBase64() string {
+	pwd := password.MustGenerate(64, 10, 10, false, true)
+	return base64.StdEncoding.EncodeToString([]byte(pwd))
 }

@@ -65,16 +65,26 @@ func (mp *ManagedProc) CaptureStdout() *bytes.Buffer {
 	buffer := new(bytes.Buffer)
 	mp.StdoutTransformer = func(in string) *string {
 		buffer.WriteString(in)
+		buffer.WriteString("\n")
 		return nil
 	}
 	return buffer
 }
 
+func (mp *ManagedProc) Dir(cwd string) {
+	mp.cmd.Dir = cwd
+}
+
 func (mp *ManagedProc) AddEnv(key string, value string) {
+	if mp.cmd.Env == nil {
+		mp.cmd.Env = os.Environ()
+	}
 	mp.cmd.Env = append(mp.cmd.Env, key+"="+value)
 }
 
 func (mp *ManagedProc) Run() error {
+	Out(os.Stderr, mp.visual)
+
 	outputsWritten, err := mp.pumpOutputs()
 	if err != nil {
 		return err

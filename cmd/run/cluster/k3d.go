@@ -5,6 +5,8 @@ import (
 	"github.com/argoproj/dev-tools/cmd/run/run"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/exponent-io/jsonpath"
 )
@@ -44,14 +46,14 @@ func NewK3dCluster(name string) (c *KubeCluster, err error) {
 func (c *KubeCluster) Close() {
 	defer c.trackerClose()
 
-	run.Out(os.Stderr, "Closing KubeCluster")
+	run.Out(os.Stderr, "Closing KubeCluster "+c.Name)
 	// cannot use NewManagedProc - run after main context is cancelled
 	err := exec.Command("k3d", "cluster", "delete", c.Name).Run()
 	if err != nil {
-		run.Out(os.Stderr, "Failed to close KubeCluster: %s", err)
+		run.Out(os.Stderr, "Failed to close KubeCluster %s: %s", c.Name, err)
 		return
 	}
-	run.Out(os.Stderr, "Closed KubeCluster")
+	run.Out(os.Stderr, "Closed KubeCluster "+c.Name)
 }
 
 func (c *KubeCluster) CreateNs(ns string) error {
@@ -81,11 +83,12 @@ func (c *KubeCluster) UseNs(ns string) error {
 
 func (c *KubeCluster) newCreateProc(ip string) *run.ManagedProc {
 	return run.NewManagedProc(
-		"k3d", "cluster", "create", c.Name,
+		"k3d", "cluster", "create",
 		"--wait",
 		"--k3s-arg", "--disable=traefik@server:*",
 		//"--api-port", ip+":6550",
 		//"-p", "443:443@loadbalancer",
+		c.Name,
 	)
 }
 
@@ -99,7 +102,7 @@ func (c *KubeCluster) KubectlProc(args ...string) *run.ManagedProc {
 }
 
 func (c *KubeCluster) KubectlGetJson(args ...string) (*jsonpath.Decoder, error) {
-	args = append(args, "get", "--output=json")
+	args = append([]string{"get", "--output=json"}, args...)
 	proc := c.KubectlProc(args...)
 	stdout := proc.CaptureStdout()
 
@@ -110,4 +113,35 @@ func (c *KubeCluster) KubectlGetJson(args ...string) (*jsonpath.Decoder, error) 
 
 	reader := bytes.NewReader(stdout.Bytes())
 	return jsonpath.NewDecoder(reader), nil
+}
+
+func (c *KubeCluster) WaitForAllPodsRunning() error {
+	for {
+		proc := c.KubectlProc(
+			"get",
+			"pods",
+			"--all-namespaces",
+			"--field-selector=status.phase!=Running",
+			"--no-headers",
+		)
+		stdout := proc.CaptureStdout()
+		err := proc.Run()
+		if err != nil {
+			return err
+		}
+
+		var problems []string
+		for l := range strings.Lines(stdout.String()) {
+			problems = append(problems, l)
+		}
+		if len(problems) == 0 {
+			return nil
+		}
+
+		run.Out(
+			os.Stderr, "Waiting for all pods to be running in %s. Waiting on:\n- %v",
+			c.Name, strings.Join(problems, "- \n"),
+		)
+		time.Sleep(10 * time.Second)
+	}
 }

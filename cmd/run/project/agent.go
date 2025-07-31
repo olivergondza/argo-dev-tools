@@ -1,12 +1,9 @@
 package project
 
 import (
-	"github.com/argoproj/dev-tools/cmd/run/cluster"
 	"github.com/argoproj/dev-tools/cmd/run/project/agent"
 	"github.com/argoproj/dev-tools/cmd/run/run"
-	"os"
 	"regexp"
-	"time"
 )
 
 func init() {
@@ -32,6 +29,10 @@ func (p projectAgent) CheckRepo() error {
 
 type agentLocal struct{}
 
+func (c agentLocal) Name() string {
+	return "local"
+}
+
 func (c agentLocal) Run() error {
 	grid, err := agent.NewGrid()
 	if err != nil {
@@ -41,51 +42,66 @@ func (c agentLocal) Run() error {
 	if grid == nil {
 		return nil
 	}
-	defer grid.Close()
-	grid.PrintDetails()
+	defer func() {
+		grid.PrintDetails(true)
+		grid.Close()
+	}()
+	grid.PrintDetails(false)
 
 	manifests, err := agent.NewManifests("./hack/dev-env/")
 	if err != nil {
 		return err
 	}
+	defer manifests.Close()
 
-	// TODO manifest modifications
-
-	err = grid.DeployArgos(manifests)
+	err = manifests.InjectValues(&agent.ManifestData{
+		LbNetPrefix:     "192.168.56.",
+		PwdControlPlane: run.RandomPwdBase64(),
+		PwdManaged:      run.RandomPwdBase64(),
+		PwdAutonomous:   run.RandomPwdBase64(),
+	})
 	if err != nil {
 		return err
 	}
 
-	// TODO
-	if err := run.NewManagedProc("sleep", "inf").Run(); err != nil {
+	err = grid.DeployControlPlane(manifests)
+	if err != nil {
+		return err
+	}
+	err = manifests.InjectManagedAddresses("argocd-redis", "192.168.56.222")
+	if err != nil {
+		return err
+	}
+	err = grid.DeployAgents(manifests)
+	if err != nil {
+		return err
+	}
+	err = manifests.GenerateAccountSecrets()
+	if err != nil {
+		return err
+	}
+	err = grid.WaitForAllPodsRunning()
+	if err != nil {
 		return err
 	}
 
-	err = c.startPrincipal(grid)
+	_, err = c.startPrincipal(grid)
+	if err != nil {
+		return err
+	}
+	err = grid.WaitForAllPodsRunning()
 	if err != nil {
 		return err
 	}
 
 	c.deployTestApps(grid)
 
-	return nil
-}
-
-// waitForArgoCdAdminSecret returns the secret one it gets populated.
-func (c agentLocal) waitForArgoCdAdminSecret(cluster *cluster.KubeCluster) string {
-	for {
-		secret, err := getInitialArgoCdAdminSecret(cluster)
-		if err == nil {
-			return secret
-		}
-
-		run.Out(os.Stderr, "Waiting for Argo CD initialized...")
-		time.Sleep(5 * time.Second)
+	// TODO
+	if err := run.NewManagedProc("sleep", "inf").Run(); err != nil {
+		return err
 	}
-}
 
-func (c agentLocal) Name() string {
-	return "local"
+	return nil
 }
 
 func (c agentLocal) deployTestApps(grid *agent.Grid) {
@@ -93,10 +109,10 @@ func (c agentLocal) deployTestApps(grid *agent.Grid) {
 	grid.Autonomous.KubectlProc("apply", "-f", "./hack/dev-env/apps/autonomous-guestbook.yaml")
 }
 
-func (c agentLocal) startPrincipal(grid *agent.Grid) error {
-	principalRedisAddress, err := c.redisAddress(grid)
+func (c agentLocal) startPrincipal(grid *agent.Grid) (string, error) {
+	principalRedisAddress, err := principalRedisAddress(grid)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	proc := run.NewManagedProc(
@@ -107,13 +123,16 @@ func (c agentLocal) startPrincipal(grid *agent.Grid) error {
 		"--allowed-namespaces='*'",
 		"--kubecontext="+grid.Principal.ContextName,
 		"--namespace="+grid.Principal.Namespace,
+		// TODO: Not sure if really not needed.
+		// Avoids: [FATAL]: Error reading TLS config for resource proxy: error getting proxy certificate: could not read TLS secret argocd-agent-control-plane/argocd-agent-resource-proxy-tls: secrets "argocd-agent-resource-proxy-tls" not found
+		"--enable-resource-proxy=false",
 		"--auth=mtls:CN=([^,]+)",
 	)
 	proc.AddEnv("ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS", principalRedisAddress)
-	return proc.Run()
+	return principalRedisAddress, proc.Run()
 }
 
-func (c agentLocal) redisAddress(grid *agent.Grid) (string, error) {
+func principalRedisAddress(grid *agent.Grid) (string, error) {
 	json, err := grid.Principal.KubectlGetJson("svc", "argocd-redis")
 	if err != nil {
 		return "", err

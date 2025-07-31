@@ -18,9 +18,7 @@ type taskTracker struct {
 
 func (t *taskTracker) UseContext(name string) (context.Context, func()) {
 	t.count.Add(1)
-	Out(os.Stderr, "CONTEXT USED "+name)
 	return t.ctx, func() {
-		Out(os.Stderr, "CONTEXT RETURNED "+name)
 		t.count.Done()
 	}
 }
