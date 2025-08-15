@@ -8,7 +8,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"regexp"
+	"strings"
 )
 
 type Project interface {
@@ -87,6 +89,15 @@ func GetOutboundIP() string {
 }
 
 func RandomPwdBase64() string {
-	pwd := password.MustGenerate(64, 10, 10, false, true)
+	pwd := password.MustGenerate(10, 3, 1, false, true)
 	return base64.StdEncoding.EncodeToString([]byte(pwd))
+}
+
+func CopyToClipboard(argoCdSecret string) error {
+	cmd := exec.Command("xclip")
+	cmd.Stdin = strings.NewReader(argoCdSecret)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("xclip failed: %s", err)
+	}
+	return nil
 }

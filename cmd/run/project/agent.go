@@ -1,7 +1,9 @@
 package project
 
 import (
+	"fmt"
 	"github.com/argoproj/dev-tools/cmd/run/cluster"
+	"github.com/argoproj/dev-tools/cmd/run/outcolor"
 	"github.com/argoproj/dev-tools/cmd/run/project/agent"
 	"github.com/argoproj/dev-tools/cmd/run/run"
 	"regexp"
@@ -55,12 +57,13 @@ func (al agentLocal) Run() error {
 	}
 	defer manifests.Close()
 
-	err = manifests.InjectValues(&agent.ManifestData{
+	manifestData := &agent.ManifestData{
 		LbNetPrefix:     "192.168.56.",
 		PwdControlPlane: run.RandomPwdBase64(),
 		PwdManaged:      run.RandomPwdBase64(),
 		PwdAutonomous:   run.RandomPwdBase64(),
-	})
+	}
+	err = manifests.InjectValues(manifestData)
 	if err != nil {
 		return err
 	}
@@ -90,6 +93,11 @@ func (al agentLocal) Run() error {
 	err = grid.WaitForAllPodsRunning()
 	if err != nil {
 		grid.PrintDetails(true)
+		return err
+	}
+
+	err = run.CopyToClipboard(manifestData.PwdControlPlane)
+	if err != nil {
 		return err
 	}
 
@@ -140,7 +148,12 @@ func (al agentLocal) startPrincipal(grid *agent.Grid) (string, error) {
 		"--auth=mtls:CN=([^,]+)",
 	)
 	proc.AddEnv("ARGOCD_PRINCIPAL_REDIS_SERVER_ADDRESS", principalRedisAddress)
-
+	decorateOutput := func(in string) *string {
+		in = fmt.Sprintf("%-10s: %s", "principal", *outcolor.ColorizeGoLog(in))
+		return &in
+	}
+	proc.StdoutTransformer = decorateOutput
+	proc.StderrTransformer = decorateOutput
 	go func() {
 		err := proc.Run()
 		if err != nil {
@@ -171,6 +184,12 @@ func (al agentLocal) startAgents(grid *agent.Grid) {
 			"--healthz-port", strconv.Itoa(portHealth),
 			"--metrics-port", strconv.Itoa(portMetrics),
 		)
+		decorateOutput := func(in string) *string {
+			in = fmt.Sprintf("%-10s: %s", mode, *outcolor.ColorizeGoLog(in))
+			return &in
+		}
+		proc.StdoutTransformer = decorateOutput
+		proc.StderrTransformer = decorateOutput
 		go func() {
 			err := proc.Run()
 			if err != nil {
@@ -187,6 +206,8 @@ func (al agentLocal) createPkiConfig(grid *agent.Grid) error {
 
 	proc := run.NewManagedProc(
 		agentctl, "pki", "init",
+		"--principal-context", grid.ControlPlane.ContextName,
+		"--principal-namespace", grid.ControlPlane.Namespace,
 	)
 	if err = proc.Run(); err != nil {
 		return err

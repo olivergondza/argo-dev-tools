@@ -74,6 +74,7 @@ func NewGrid() (*Grid, error) {
 				errorChan <- err
 				return
 			}
+			// TODO: prone to race condition
 			err = clstr.UseNs("argocd")
 			if err != nil {
 				errorChan <- err

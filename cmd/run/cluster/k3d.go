@@ -6,10 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/exponent-io/jsonpath"
 )
+
+// kubeConfigMu guards concurrent access to ~/.kube/config that otherwise leads to error
+var kubeConfigMu sync.Mutex
 
 type KubeCluster struct {
 	Name        string
@@ -66,6 +70,8 @@ func (c *KubeCluster) CreateNs(ns string) error {
 }
 
 func (c *KubeCluster) UseNs(ns string) error {
+	kubeConfigMu.Lock()
+	defer kubeConfigMu.Unlock()
 	c.Namespace = ns
 
 	// Needed by the `make` targets

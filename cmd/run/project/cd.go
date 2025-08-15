@@ -7,9 +7,7 @@ import (
 	"github.com/argoproj/dev-tools/cmd/run/outcolor"
 	"github.com/argoproj/dev-tools/cmd/run/run"
 	"os"
-	"os/exec"
 	"regexp"
-	"strings"
 	"time"
 )
 
@@ -68,11 +66,9 @@ func (c cdLocal) Run() error {
 		return err
 	}
 
-	cmd := exec.Command("xclip")
-	cmd.Stdin = strings.NewReader(argoCdSecret)
-	err = cmd.Run()
+	err = run.CopyToClipboard(argoCdSecret)
 	if err != nil {
-		return fmt.Errorf("xclip failed: %s", err)
+		return err
 	}
 
 	// The login will only work after the `make start-local` progressed enough - run in background
