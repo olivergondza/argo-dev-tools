@@ -38,13 +38,13 @@ func CheckMarker(filePath string, regexPattern *regexp.Regexp) error {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("not Run from project directory. file does not exist: %s", filePath)
+			return fmt.Errorf("not run from project directory. file does not exist: %s", filePath)
 		}
 		return fmt.Errorf("error accessing file info: %w", err)
 	}
 
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("not Run from project directory. path is not a regular file: %s", filePath)
+		return fmt.Errorf("not run from project directory. path is not a regular file: %s", filePath)
 	}
 
 	file, err := os.Open(filePath)
@@ -64,7 +64,7 @@ func CheckMarker(filePath string, regexPattern *regexp.Regexp) error {
 		return fmt.Errorf("error reading file %s: %w", filePath, err)
 	}
 
-	return fmt.Errorf("not Run from project directory")
+	return fmt.Errorf("not run from project directory")
 }
 
 func CheckDocker() error {

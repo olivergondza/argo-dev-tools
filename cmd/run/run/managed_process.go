@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +15,7 @@ import (
 )
 
 // lineTransformer optionally mutates lines of a ManagedProc output.
-// Modified string will be printed, line is omitted is nil is returned.
+// Modified string will be printed, line is omitted if nil is returned.
 type lineTransformer func(in string) *string
 
 type ManagedProc struct {
@@ -165,18 +166,29 @@ func (sp *streamPump) pump() {
 		sp.transformer = func(s string) *string { return &s }
 	}
 
-	scanner := bufio.NewScanner(sp.reader)
-	for scanner.Scan() {
-		line := sp.transformer(scanner.Text())
-
-		if line != nil {
-			_, err := fmt.Fprintf(sp.writer, "%s\n", *line)
-			if err != nil {
-				return
+	rd := bufio.NewReader(sp.reader)
+	lastLine := false
+	for {
+		inLine, err := rd.ReadString('\n')
+		if err != nil {
+			// The upstream process completed
+			if err == io.EOF || errors.Is(err, os.ErrClosed) {
+				lastLine = true
+			} else {
+				panic(err)
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		Out(os.Stderr, "Error reading from pipe: %v", err)
+
+		outLine := sp.transformer(inLine)
+		if outLine != nil {
+			_, err = fmt.Fprint(sp.writer, *outLine)
+			if err != nil {
+				panic(err)
+			}
+		}
+
+		if lastLine {
+			break
+		}
 	}
 }

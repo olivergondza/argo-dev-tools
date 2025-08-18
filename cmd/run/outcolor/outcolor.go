@@ -2,9 +2,10 @@ package outcolor
 
 import (
 	"encoding/json"
+	"strings"
+
 	"github.com/TylerBrock/colorjson"
 	"github.com/fatih/color"
-	"strings"
 )
 
 var (
@@ -36,7 +37,7 @@ func ColorizeGoreman(in string) *string {
 			if err != nil {
 				panic(err)
 			}
-			out = before + string(colorized)
+			out = before + string(colorized) + "\n"
 		}
 	}
 

@@ -3,12 +3,13 @@ package project
 import (
 	"encoding/base64"
 	"fmt"
-	"github.com/argoproj/dev-tools/cmd/run/cluster"
-	"github.com/argoproj/dev-tools/cmd/run/outcolor"
-	"github.com/argoproj/dev-tools/cmd/run/run"
 	"os"
 	"regexp"
 	"time"
+
+	"github.com/argoproj/dev-tools/cmd/run/cluster"
+	"github.com/argoproj/dev-tools/cmd/run/outcolor"
+	"github.com/argoproj/dev-tools/cmd/run/run"
 )
 
 func init() {
@@ -47,7 +48,7 @@ func (c cdLocal) Run() error {
 	defer cluster.Close()
 
 	// oc -n argocd apply -f manifests/install.yaml
-	if err := cluster.KubectlProc("apply", "-f", "manifests/install.yaml").Run(); err != nil {
+	if err := cluster.KubectlProc("create", "-f", "manifests/install.yaml").Run(); err != nil {
 		return fmt.Errorf("failed deploying argo-cd manifests: %s", err)
 	}
 
@@ -158,6 +159,10 @@ func (c cdE2e) Run() error {
 		return nil
 	}
 	defer cluster.Close()
+
+	// The login will only work after the `make start-local` progressed enough - run in background
+	// It will terminate itself on success, or die trying.
+	go authenticateArgocdCli("password")
 
 	mp := run.NewManagedProc(
 		"make", "start-e2e-local",
