@@ -19,7 +19,6 @@ func (p projectRollouts) Name() string {
 
 func (p projectRollouts) Commands() []run.ProjectCommand {
 	return []run.ProjectCommand{
-		rolloutsLocal{},
 		rolloutsE2e{},
 	}
 }
@@ -28,33 +27,10 @@ func (p projectRollouts) CheckRepo() error {
 	return run.CheckMarker("Makefile", regexp.MustCompile("^PACKAGE=github.com/argoproj/argo-rollouts$"))
 }
 
-type rolloutsLocal struct{}
-
-func (c rolloutsLocal) Run() error {
-	cluster, err := startCluster("argo-rollouts")
-	if err != nil {
-		return err
-	}
-	// Interrupted
-	if cluster == nil {
-		return nil
-	}
-	defer cluster.Close()
-
-	panic("implement me")
-
-	return nil
-}
-
-func (c rolloutsLocal) Name() string {
-	return "local"
-}
-
 type rolloutsE2e struct{}
 
 func (c rolloutsE2e) Run() error {
 	// https://argo-rollouts.readthedocs.io/en/stable/CONTRIBUTING/#running-e2e-tests
-
 	cluster, err := startCluster("argo-rollouts")
 	if err != nil {
 		return err
