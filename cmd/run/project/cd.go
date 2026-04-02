@@ -35,7 +35,7 @@ func newCDLocalCommand() *cobra.Command {
 			if err := opts.checkPwd(); err != nil {
 				return err
 			}
-			return opts.e2e()
+			return opts.local()
 		},
 	}
 
@@ -64,11 +64,13 @@ func newCDE2ECommand() *cobra.Command {
 }
 
 type cdOpts struct {
-	sourceHydrator bool
+	progressiveSync bool
+	sourceHydrator  bool
 }
 
 func (opts *cdOpts) registerFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&opts.sourceHydrator, "source-hydrator", false, "Enable source hydrator")
+	cmd.Flags().BoolVar(&opts.progressiveSync, "progressive-sync", false, "Enable progressive sync")
 }
 
 func (opts *cdOpts) checkPwd() error {
@@ -85,21 +87,29 @@ func (opts *cdOpts) local() error {
 	}
 	defer cluster.Close()
 
-	if err := cluster.KubectlProc("create", "-f", "manifests/install.yaml").Run(); err != nil {
-		return fmt.Errorf("failed deploying argo-cd manifests: %s", err)
+	manifestInstall := "manifests/install.yaml"
+	if opts.sourceHydrator {
+		manifestInstall = "manifests/install-with-hydrator.yaml"
+	}
+
+	if err := cluster.KubectlProc("create", "-f", manifestInstall).Run(); err != nil {
+		return fmt.Errorf("failed deploying argo-cd manifests from %q: %s", manifestInstall, err)
 	}
 
 	argoCdSecret := waitForArgoCdAdminSecret(cluster)
 
-	if err := scaleToZero(cluster,
-		"statefulset/argocd-application-controller",
+	phonyResources := []string{"statefulset/argocd-application-controller",
 		"deployment/argocd-dex-server",
 		"deployment/argocd-repo-server",
 		"deployment/argocd-server",
 		"deployment/argocd-redis",
 		"deployment/argocd-applicationset-controller",
 		"deployment/argocd-notifications-controller",
-	); err != nil {
+	}
+	if opts.sourceHydrator {
+		phonyResources = append(phonyResources, "deployment/argocd-commit-server")
+	}
+	if err := scaleToZero(cluster, phonyResources...); err != nil {
 		return err
 	}
 
@@ -109,12 +119,14 @@ func (opts *cdOpts) local() error {
 
 	go authenticateArgocdCli(argoCdSecret)
 
-	mp := run.NewManagedProc(
-		"make", "start-local",
+	opArgs := []string{"make", "start-local",
 		"ARGOCD_GPG_ENABLED=false",
 		"ARGOCD_E2E_REPOSERVER_PORT=8088",
-		"ARGOCD_APPLICATIONSET_CONTROLLER_ENABLE_PROGRESSIVE_SYNCS=true",
-	)
+	}
+	if opts.progressiveSync {
+		opArgs = append(opArgs, "ARGOCD_APPLICATIONSET_CONTROLLER_ENABLE_PROGRESSIVE_SYNCS=true")
+	}
+	mp := run.NewManagedProc(opArgs...)
 	mp.StdoutTransformer = outcolor.ColorizeGoreman
 	return mp.Run()
 }

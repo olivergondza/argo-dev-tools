@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/fatih/color"
 )
 
 // lineTransformer optionally mutates lines of a ManagedProc output.
@@ -89,7 +91,7 @@ func (mp *ManagedProc) AddEnv(key string, value string) {
 }
 
 func (mp *ManagedProc) Run() error {
-	Out(os.Stderr, mp.visual())
+	Out(os.Stderr, color.GreenString(mp.visual()))
 
 	outputsWritten, err := mp.pumpOutputs()
 	if err != nil {
@@ -148,6 +150,7 @@ func (mp *ManagedProc) visual() string {
 	for _, secret := range mp.mask {
 		cmdline = strings.ReplaceAll(cmdline, secret, "*REDACTED*")
 	}
+
 	return fmt.Sprintf("$ %s", cmdline)
 }
 
