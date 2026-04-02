@@ -10,51 +10,88 @@ import (
 	"github.com/argoproj/dev-tools/cmd/run/cluster"
 	"github.com/argoproj/dev-tools/cmd/run/outcolor"
 	"github.com/argoproj/dev-tools/cmd/run/run"
+	"github.com/spf13/cobra"
 )
 
-func init() {
-	run.ProjectRegistry["cd"] = projectCd{}
-}
-
-type projectCd struct {
-}
-
-func (p projectCd) Name() string {
-	return "cd"
-}
-
-func (p projectCd) Commands() []run.ProjectCommand {
-	return []run.ProjectCommand{
-		cdLocal{},
-		cdE2e{},
+func NewCDCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cd",
+		Short: "Argo CD workflows",
 	}
+
+	cmd.AddCommand(newCDLocalCommand())
+	cmd.AddCommand(newCDE2ECommand())
+
+	return cmd
 }
 
-func (p projectCd) CheckRepo() error {
+func newCDLocalCommand() *cobra.Command {
+	opts := cdOpts{}
+	cmd := &cobra.Command{
+		Use:   "local",
+		Short: "Run Argo CD locally",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := opts.checkPwd(); err != nil {
+				return err
+			}
+			return opts.e2e()
+		},
+	}
+
+	opts.registerFlags(cmd)
+
+	return cmd
+}
+
+func newCDE2ECommand() *cobra.Command {
+	opts := cdOpts{}
+	cmd := &cobra.Command{
+		Use:   "e2e",
+		Short: "Run Argo CD e2e",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := opts.checkPwd(); err != nil {
+				return err
+			}
+			return opts.e2e()
+		},
+	}
+
+	opts.registerFlags(cmd)
+
+	return cmd
+}
+
+type cdOpts struct {
+	sourceHydrator bool
+}
+
+func (opts *cdOpts) registerFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&opts.sourceHydrator, "source-hydrator", false, "Enable source hydrator")
+}
+
+func (opts *cdOpts) checkPwd() error {
 	return run.CheckMarker("Makefile", regexp.MustCompile("^PACKAGE=github.com/argoproj/argo-cd/"))
 }
 
-type cdLocal struct{}
-
-func (c cdLocal) Run() error {
+func (opts *cdOpts) local() error {
 	cluster, err := startCluster("argocd")
 	if err != nil {
 		return err
 	}
-	// Interrupted
 	if cluster == nil {
 		return nil
 	}
 	defer cluster.Close()
 
-	// oc -n argocd apply -f manifests/install.yaml
 	if err := cluster.KubectlProc("create", "-f", "manifests/install.yaml").Run(); err != nil {
 		return fmt.Errorf("failed deploying argo-cd manifests: %s", err)
 	}
 
-	argoCdSecret := c.waitForArgoCdAdminSecret(cluster)
+	argoCdSecret := waitForArgoCdAdminSecret(cluster)
 
-	err = scaleToZero(cluster,
+	if err := scaleToZero(cluster,
 		"statefulset/argocd-application-controller",
 		"deployment/argocd-dex-server",
 		"deployment/argocd-repo-server",
@@ -62,33 +99,50 @@ func (c cdLocal) Run() error {
 		"deployment/argocd-redis",
 		"deployment/argocd-applicationset-controller",
 		"deployment/argocd-notifications-controller",
-	)
-	if err != nil {
+	); err != nil {
 		return err
 	}
 
-	err = run.CopyToClipboard(argoCdSecret)
-	if err != nil {
+	if err := run.CopyToClipboard(argoCdSecret); err != nil {
 		return err
 	}
 
-	// The login will only work after the `make start-local` progressed enough - run in background
-	// It will terminate itself on success, or die trying.
 	go authenticateArgocdCli(argoCdSecret)
 
 	mp := run.NewManagedProc(
 		"make", "start-local",
 		"ARGOCD_GPG_ENABLED=false",
 		"ARGOCD_E2E_REPOSERVER_PORT=8088",
-		"ARGOCD_APPLICATIONSET_CONTROLLER_ENABLE_PROGRESSIVE_SYNCS=true", // https://argo-cd.readthedocs.io/en/latest/operator-manual/applicationset/Progressive-Syncs/
+		"ARGOCD_APPLICATIONSET_CONTROLLER_ENABLE_PROGRESSIVE_SYNCS=true",
 	)
 	mp.StdoutTransformer = outcolor.ColorizeGoreman
-	// This is the meat - here we wait for ^C
 	return mp.Run()
 }
 
-// waitForArgoCdAdminSecret returns the secret one it gets populated.
-func (c cdLocal) waitForArgoCdAdminSecret(cluster *cluster.KubeCluster) string {
+func (opts *cdOpts) e2e() error {
+	cluster, err := startCluster("argocd")
+	if err != nil {
+		return err
+	}
+	if cluster == nil {
+		return nil
+	}
+	defer cluster.Close()
+
+	go authenticateArgocdCli("password")
+
+	mp := run.NewManagedProc(
+		"make", "start-e2e-local",
+		"ARGOCD_E2E_REPOSERVER_PORT=8088",
+		"COVERAGE_ENABLED=true",
+		"ARGOCD_FAKE_IN_CLUSTER=true",
+		"ARGOCD_E2E_K3S=true",
+	)
+	mp.StdoutTransformer = outcolor.ColorizeGoreman
+	return mp.Run()
+}
+
+func waitForArgoCdAdminSecret(cluster *cluster.KubeCluster) string {
 	for {
 		secret, err := getInitialArgoCdAdminSecret(cluster)
 		if err == nil {
@@ -103,8 +157,7 @@ func (c cdLocal) waitForArgoCdAdminSecret(cluster *cluster.KubeCluster) string {
 func authenticateArgocdCli(secret string) {
 	for {
 		mp := run.NewManagedProc("./dist/argocd", "login", "--plaintext", "localhost:8080", "--username=admin", "--password="+secret)
-		err := mp.Run()
-		if err == nil {
+		if err := mp.Run(); err == nil {
 			break
 		}
 
@@ -121,8 +174,7 @@ func getInitialArgoCdAdminSecret(c *cluster.KubeCluster) (string, error) {
 		"-o", "jsonpath={.data.password}",
 	)
 	stdoutBuffer := proc.CaptureStdout()
-	err := proc.Run()
-	if err != nil {
+	if err := proc.Run(); err != nil {
 		return "", err
 	}
 
@@ -141,41 +193,4 @@ func scaleToZero(c *cluster.KubeCluster, resources ...string) error {
 		}
 	}
 	return nil
-}
-
-func (c cdLocal) Name() string {
-	return "local"
-}
-
-type cdE2e struct{}
-
-func (c cdE2e) Run() error {
-	cluster, err := startCluster("argocd")
-	if err != nil {
-		return err
-	}
-	// Interrupted
-	if cluster == nil {
-		return nil
-	}
-	defer cluster.Close()
-
-	// The login will only work after the `make start-local` progressed enough - run in background
-	// It will terminate itself on success, or die trying.
-	go authenticateArgocdCli("password")
-
-	mp := run.NewManagedProc(
-		"make", "start-e2e-local",
-		"ARGOCD_E2E_REPOSERVER_PORT=8088",
-		"COVERAGE_ENABLED=true",
-		"ARGOCD_FAKE_IN_CLUSTER=true",
-		"ARGOCD_E2E_K3S=true",
-	)
-	mp.StdoutTransformer = outcolor.ColorizeGoreman
-	// This is the meat - here we wait for ^C
-	return mp.Run()
-}
-
-func (c cdE2e) Name() string {
-	return "e2e"
 }

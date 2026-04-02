@@ -4,27 +4,15 @@ import (
 	"bufio"
 	"encoding/base64"
 	"fmt"
-	"github.com/sethvargo/go-password/password"
 	"log"
 	"net"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/sethvargo/go-password/password"
 )
-
-type Project interface {
-	Name() string
-	CheckRepo() error
-	Commands() []ProjectCommand
-}
-
-type ProjectCommand interface {
-	Name() string
-	Run() error
-}
-
-var ProjectRegistry = make(map[string]Project)
 
 func Out(file *os.File, msg string, fmtArgs ...any) {
 	if _, err := fmt.Fprintf(file, msg+"\n", fmtArgs...); err != nil {
@@ -38,13 +26,13 @@ func CheckMarker(filePath string, regexPattern *regexp.Regexp) error {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("not run from project directory. file does not exist: %s", filePath)
+			return fmt.Errorf("not run from correct project directory. file does not exist: %s", filePath)
 		}
 		return fmt.Errorf("error accessing file info: %w", err)
 	}
 
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("not run from project directory. path is not a regular file: %s", filePath)
+		return fmt.Errorf("not run from correct project directory. path is not a regular file: %s", filePath)
 	}
 
 	file, err := os.Open(filePath)
@@ -72,7 +60,6 @@ func CheckDocker() error {
 	if err := mp.Run(); err != nil {
 		return fmt.Errorf("docker not running: %s", err)
 	}
-
 	return nil
 }
 

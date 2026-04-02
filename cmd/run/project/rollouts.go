@@ -1,41 +1,42 @@
 package project
 
 import (
+	"regexp"
+
 	"github.com/argoproj/dev-tools/cmd/run/outcolor"
 	"github.com/argoproj/dev-tools/cmd/run/run"
-	"regexp"
+	"github.com/spf13/cobra"
 )
 
-func init() {
-	run.ProjectRegistry["rollouts"] = projectRollouts{}
+func NewRolloutsCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rollouts",
+		Short: "Argo Rollouts workflows",
+	}
+	cmd.AddCommand(newRolloutsE2ECommand())
+	return cmd
 }
 
-type projectRollouts struct {
-}
-
-func (p projectRollouts) Name() string {
-	return "rollouts"
-}
-
-func (p projectRollouts) Commands() []run.ProjectCommand {
-	return []run.ProjectCommand{
-		rolloutsE2e{},
+func newRolloutsE2ECommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "e2e",
+		Short: "Run Argo Rollouts e2e workflow",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRolloutsE2E()
+		},
 	}
 }
 
-func (p projectRollouts) CheckRepo() error {
-	return run.CheckMarker("Makefile", regexp.MustCompile("^PACKAGE=github.com/argoproj/argo-rollouts$"))
-}
+func runRolloutsE2E() error {
+	err := run.CheckMarker("Makefile", regexp.MustCompile("^PACKAGE=github.com/argoproj/argo-rollouts$"))
+	if err != nil {
+		return err
+	}
 
-type rolloutsE2e struct{}
-
-func (c rolloutsE2e) Run() error {
-	// https://argo-rollouts.readthedocs.io/en/stable/CONTRIBUTING/#running-e2e-tests
 	cluster, err := startCluster("argo-rollouts")
 	if err != nil {
 		return err
 	}
-	// Interrupted
 	if cluster == nil {
 		return nil
 	}
@@ -44,18 +45,12 @@ func (c rolloutsE2e) Run() error {
 	if err = cluster.KubectlProc("apply", "-k", "manifests/crds").Run(); err != nil {
 		return err
 	}
-
 	if err = cluster.KubectlProc("apply", "-f", "test/e2e/crds").Run(); err != nil {
 		return err
 	}
 
-	// This is the meat - here we wait for ^C
 	mp := run.NewManagedProc("make", "start-e2e")
 	mp.StderrTransformer = outcolor.ColorizeGoLog
 	mp.StdoutTransformer = outcolor.ColorizeGoLog
 	return mp.Run()
-}
-
-func (c rolloutsE2e) Name() string {
-	return "e2e"
 }
