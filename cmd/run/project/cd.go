@@ -203,6 +203,10 @@ func waitForArgoCdAdminSecret(cluster *cluster.KubeCluster) string {
 		}
 
 		run.Out(os.Stderr, "Waiting for Argo CD initialized...")
+
+		if run.WasInterrupted() {
+			return ""
+		}
 		time.Sleep(5 * time.Second)
 	}
 }
