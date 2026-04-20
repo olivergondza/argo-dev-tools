@@ -66,11 +66,13 @@ func newCDE2ECommand() *cobra.Command {
 type cdOpts struct {
 	progressiveSync bool
 	sourceHydrator  bool
+	applyResources  []string
 }
 
 func (opts *cdOpts) registerFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&opts.sourceHydrator, "source-hydrator", false, "Enable source hydrator")
 	cmd.Flags().BoolVar(&opts.progressiveSync, "progressive-sync", false, "Enable progressive sync")
+	cmd.Flags().StringSliceVar(&opts.applyResources, "apply-resources", nil, "Specify resources to apply, namely AppProjects, Applications and AppSets")
 }
 
 func (opts *cdOpts) checkPwd() error {
@@ -96,9 +98,14 @@ func (opts *cdOpts) local() error {
 		return fmt.Errorf("failed deploying argo-cd manifests from %q: %s", manifestInstall, err)
 	}
 
+	if err := opts.doApplyResources(cluster); err != nil {
+		return err
+	}
+
 	argoCdSecret := waitForArgoCdAdminSecret(cluster)
 
-	phonyResources := []string{"statefulset/argocd-application-controller",
+	phonyResources := []string{
+		"statefulset/argocd-application-controller",
 		"deployment/argocd-dex-server",
 		"deployment/argocd-repo-server",
 		"deployment/argocd-server",
@@ -152,6 +159,40 @@ func (opts *cdOpts) e2e() error {
 	)
 	mp.StdoutTransformer = outcolor.ColorizeGoreman
 	return mp.Run()
+}
+
+func (opts *cdOpts) doApplyResources(cluster *cluster.KubeCluster) error {
+	for _, resource := range opts.applyResources {
+		fileInfo, err := os.Stat(resource)
+		if err != nil {
+			return fmt.Errorf("cannot use resource from path %q: %s", resource, err)
+		}
+
+		var files []string
+		if !fileInfo.IsDir() {
+			files = []string{resource}
+		} else {
+			entries, err := os.ReadDir(resource)
+			if err != nil {
+				return fmt.Errorf("failed reading directory %q: %s", resource, err)
+			}
+			for _, entry := range entries {
+				newPath := resource + "/" + entry.Name()
+				if entry.IsDir() {
+					return fmt.Errorf("no nested resource directories %q", newPath)
+				}
+				files = append(files, newPath)
+			}
+		}
+
+		for _, file := range files {
+			if err := cluster.KubectlProc("create", "-f", file).Run(); err != nil {
+				return fmt.Errorf("failed deploying argo-cd manifests from %q: %s", file, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 func waitForArgoCdAdminSecret(cluster *cluster.KubeCluster) string {
