@@ -126,12 +126,12 @@ func (opts *cdOpts) local() error {
 
 	go authenticateArgocdCli(argoCdSecret)
 
-	opArgs := []string{"make", "start-local",
-		"ARGOCD_GPG_ENABLED=false",
-		"ARGOCD_E2E_REPOSERVER_PORT=8088",
-	}
+	opArgs := []string{"make", "start-local"}
 	if opts.progressiveSync {
 		opArgs = append(opArgs, "ARGOCD_APPLICATIONSET_CONTROLLER_ENABLE_PROGRESSIVE_SYNCS=true")
+	}
+	if opts.sourceHydrator {
+		opArgs = append(opArgs, "ARGOCD_HYDRATOR_ENABLED=true")
 	}
 	mp := run.NewManagedProc(opArgs...)
 	mp.StdoutTransformer = outcolor.ColorizeGoreman
